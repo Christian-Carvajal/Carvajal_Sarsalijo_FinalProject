@@ -1,3 +1,12 @@
+# Academic Scaffolding, Tests & Internal Drafts (Excluded from submission repo)
+00_Instructions_&_Rubrics/
+01_Work_In_Progress/
+02_Tests_&_Drafts/
+FINAL_SUBMISSION/
+*.pdf
+*.zip
+
+# Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
