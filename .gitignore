@@ -4,6 +4,7 @@
 02_Tests_&_Drafts/
 FINAL_SUBMISSION/
 *.pdf
+*.docx
 *.zip
 
 # Python Bytecode & Cache

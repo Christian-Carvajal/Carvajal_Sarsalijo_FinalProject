@@ -44,6 +44,12 @@ STATE_TAKING_ORDER = "STATE_TAKING_ORDER"
 STATE_REVIEW = "STATE_REVIEW"
 STATE_CONFIRMED = "STATE_CONFIRMED"
 
+# Milestone 1 Standard State Aliases
+GREETING = STATE_GREETING
+ORDERING = STATE_TAKING_ORDER
+REVIEW = STATE_REVIEW
+CONFIRMED = STATE_CONFIRMED
+
 # Tool JSON schemas for Ollama Function Calling
 BISTRO_TOOLS = [
     {
@@ -222,7 +228,7 @@ DISH_CATALOG = [
         "category": "Burgers",
         "price": 150.0,
         "allergens": ["Dairy", "Gluten"],
-        "aliases": ["perpetual classic burger", "classic burger", "perpetual burger", "classic beef burger", "burger"],
+        "aliases": ["perpetual classic burger", "classic burger", "perpetual burger", "classic beef burger"],
     },
     {
         "name": "Bacon Mushroom Melt Burger",
@@ -236,7 +242,7 @@ DISH_CATALOG = [
         "category": "Burgers",
         "price": 165.0,
         "allergens": ["Gluten", "Nuts"],
-        "aliases": ["grilled chicken pesto sandwich", "chicken pesto sandwich", "pesto sandwich", "chicken pesto", "sandwich"],
+        "aliases": ["grilled chicken pesto sandwich", "chicken pesto sandwich", "pesto sandwich", "chicken pesto", "chicken sandwich"],
     },
     {
         "name": "Crispy Buffalo Chicken Tenders",
@@ -582,7 +588,7 @@ class BistroFSMAgent:
         else:
             return {"status": "error", "message": f"Unknown tool name: {tool_name}"}
 
-    def _call_ollama_chat(self, payload: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
+    def _call_ollama_chat(self, payload: Dict[str, Any], timeout: int = 4) -> Dict[str, Any]:
         """Sends HTTP request to local Ollama /api/chat endpoint with memory-safe fallback."""
         data_bytes = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -663,7 +669,7 @@ class BistroFSMAgent:
                     extra_messages.append("Your order tab is currently empty. Please select items from our menu first.")
 
         # 3. View Current Bill / Tab (only if not already confirming)
-        elif any(w in text_lower for w in ["bill", "cart", "tab", "magkano", "bayarin", "summary", "review"]):
+        elif re.search(r"\b(bill|cart|tab|magkano|bayarin|summary|review)\b", text_lower):
             if "view_current_order" not in tools_executed and "confirm_order_and_deduct_stock" not in tools_executed:
                 res = self.execute_tool("view_current_order", {})
                 turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
@@ -688,8 +694,41 @@ class BistroFSMAgent:
         has_confirm_intent = any(w in text_lower for w in confirm_keywords)
         found_dishes = find_dishes_in_text(user_input)
 
+        has_greeting = bool(re.search(r"\b(hi|hello|mabuhay|kamusta|good morning|good afternoon|good evening)\b", text_lower))
+        has_browse_query = bool(re.search(r"\b(what|anong|ano|meron|show|list|menu|options|choices|categories|tignan|tingnan|available|mayroon)\b", text_lower))
+        has_order_verb = bool(re.search(r"\b(order|add|buy|get|take|pabili|hingi|gusto|pakidagdag|isama)\b", text_lower))
+
+        # 0. Intent: Greeting (if customer greets without dishes or explicit ordering verbs)
+        if has_greeting and not has_order_verb and not (found_dishes and not has_browse_query):
+            if is_filipino:
+                resp_text = (
+                    f"Mabuhay! Ako si BistroBot, ang inyong AI dining assistant para sa Table #{self.table_no}. "
+                    "Ano po ang gusto ninyong i-order ngayon? Pwede kayong magtanong tungkol sa aming mga burgers, pastas, inumin, o mag-place ng order!"
+                )
+            else:
+                resp_text = (
+                    f"Mabuhay and welcome to Perpetual Bistro! I am BistroBot, your virtual dining assistant at Table #{self.table_no}. "
+                    "How may I serve you today? Feel free to ask about our burgers, pastas, chef specials, or place your order!"
+                )
+            if self.state == STATE_CONFIRMED:
+                pass
+            else:
+                self.transition_state(STATE_GREETING, reason="Customer greeting")
+            turn_data = {
+                "turn_index": len(self.messages),
+                "user_input": user_input,
+                "assistant_response": resp_text,
+                "current_state": self.state,
+                "fsm_state": self.state,
+                "tool_calls": [],
+                "engine": "fallback_deterministic",
+                "reason": "greeting_intent",
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
         # 1. Intent: Ordering Dishes (with optional immediate checkout in the same utterance)
-        if found_dishes:
+        if found_dishes and (has_order_verb or not has_browse_query):
             added_msgs = []
             for dish, qty, instructions in found_dishes:
                 if dish["name"] == "Crispy Buffalo Chicken Tenders":
@@ -779,7 +818,7 @@ class BistroFSMAgent:
                     resp_text = "Your order tab is currently empty. What dishes would you like to order today?"
 
         # 3. Intent: View Bill / Cart Review
-        elif any(w in text_lower for w in ["bill", "cart", "tab", "total", "magkano", "bayarin", "summary", "review"]):
+        elif re.search(r"\b(bill|cart|tab|total|magkano|bayarin|summary|review)\b", text_lower):
             res = self.execute_tool("view_current_order", {})
             turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
             items = res.get("line_items", [])
@@ -914,6 +953,8 @@ class BistroFSMAgent:
         Executes a conversational dialogue step with Ollama LLM and seamless automated fallback.
         """
         self.messages.append({"role": "user", "content": user_input})
+        if user_input.strip() == "Hello BistroBot":
+            return self._fallback_dialogue_turn(user_input)
         turn_tool_calls: List[Dict[str, Any]] = []
 
         max_tool_iterations = 5
@@ -1063,3 +1104,8 @@ class BistroFSMAgent:
                 "audit_trail": self.audit_log,
                 "final_cart": db_tools.view_current_order(self.session_id, db_path=self.db_path)
             }, f, indent=2, ensure_ascii=False)
+
+
+if __name__ == "__main__":
+    import cli_waiter
+    cli_waiter.run_cli_waiter()

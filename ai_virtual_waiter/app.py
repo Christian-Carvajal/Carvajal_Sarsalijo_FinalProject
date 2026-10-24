@@ -490,4 +490,15 @@ if __name__ == "__main__":
     print(f"[Perpetual Bistro] Core FSM Controller:  Active (fsm_controller.py)")
     print(f"[Perpetual Bistro] SQLite Tool Engine:   Active (restaurant.db)")
     print(f"==================================================================\n")
+    import threading
+    import webbrowser
+    def _open_kiosk(url):
+        import time
+        time.sleep(1.2)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    threading.Thread(target=_open_kiosk, args=(f"http://127.0.0.1:{port}",), daemon=True).start()
+
     uvicorn.run("app:app", host=args.host, port=port, reload=True)
