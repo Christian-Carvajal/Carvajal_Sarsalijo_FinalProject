@@ -64,7 +64,20 @@ CREATE TABLE IF NOT EXISTS kitchen_tickets (
     FOREIGN KEY (session_id) REFERENCES table_sessions(session_id)
 );
 
--- 5. Seed Data: Authentic Perpetual Bistro Menu & Campus Value Combos
+-- 5. Removed Items Audit Table (Tracks item deletions and cart changes)
+CREATE TABLE IF NOT EXISTS removed_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    item_id INTEGER,
+    item_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    unit_price REAL NOT NULL DEFAULT 0.0,
+    removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT DEFAULT 'Customer removal',
+    FOREIGN KEY (session_id) REFERENCES table_sessions(session_id) ON DELETE CASCADE
+);
+
+-- 6. Seed Data: Authentic Perpetual Bistro Menu & Campus Value Combos
 INSERT OR IGNORE INTO menu_items (name, category, price, stock_qty, allergens, description) VALUES
 -- Burgers & Sandwiches
 ('Perpetual Classic Burger', 'Burgers', 150.00, 25, 'Gluten, Dairy', 'Juicy beef patty with cheddar cheese, crisp lettuce, tomato, and house bistro sauce.'),

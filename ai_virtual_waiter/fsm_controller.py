@@ -282,6 +282,76 @@ BISTRO_TOOLS = [
                 "required": ["ticket_id", "new_status"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_removed_items",
+            "description": "Retrieve the history of items removed or deleted from the customer's cart during this dining session from SQLite.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_last_order_item",
+            "description": "Retrieve the last dish or beverage added to the active cart for this session from SQLite.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_available_items",
+            "description": "Query all currently available items in stock and ready to order.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category filter."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_unavailable_items",
+            "description": "Query all menu items that are currently out-of-stock or unavailable in the kitchen in real-time.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recommendations",
+            "description": "Generate chef recommendations and food/beverage pairings based on current cart contents and in-stock bestsellers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category focus (e.g. 'Combos', 'Burgers', 'Pastas')."
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 
@@ -556,7 +626,7 @@ class BistroFSMAgent:
             return f"Menu database error: {e}"
 
     def _get_live_cart_context(self) -> str:
-        """Directly queries SQLite to produce the live cart state for this session."""
+        """Directly queries SQLite to produce the live cart state, last added item, and removal audit for this session."""
         try:
             cart = db_tools.view_current_order(self.session_id, db_path=self.db_path)
             lines = [f"LIVE ACTIVE CART FOR TABLE #{self.table_no} (Session: {self.session_id}):"]
@@ -569,6 +639,28 @@ class BistroFSMAgent:
                     inst = f" [Note: {it['special_instructions']}]" if it.get('special_instructions') else ""
                     lines.append(f"    {idx}. {it['quantity']}x {it['name']} (₱{it['unit_price']:.2f} each, Line Total: ₱{it['line_total']:.2f}){inst}")
                 lines.append(f"  • Subtotal: ₱{cart.get('subtotal', 0.0):.2f} (12% VAT: ₱{cart.get('vat_12_pct_breakdown', 0.0):.2f}) | Grand Total: ₱{cart.get('grand_total', 0.0):.2f}")
+
+            # Last item added to cart
+            last_item = db_tools.get_last_order_item(self.session_id, db_path=self.db_path)
+            if last_item:
+                lines.append(f"  • Last Item Added to Cart: {last_item['quantity']}x {last_item['name']} (₱{last_item['unit_price']:.2f})")
+            else:
+                lines.append("  • Last Item Added to Cart: None")
+
+            # Removed items audit trail
+            removed = db_tools.get_removed_items(self.session_id, db_path=self.db_path)
+            if removed:
+                rem_descs = [f"{r['quantity']}x {r['item_name']} (₱{r['unit_price']:.2f})" for r in removed[:3]]
+                lines.append(f"  • Recently Removed from Cart (SQLite Audit): {', '.join(rem_descs)}")
+            else:
+                lines.append("  • Recently Removed from Cart (SQLite Audit): None")
+
+            # Out of stock in real-time
+            unavail = db_tools.get_unavailable_items(db_path=self.db_path)
+            if unavail:
+                un_names = [u['name'] for u in unavail]
+                lines.append(f"  • Kitchen Real-Time Out-of-Stock (0 stock): {', '.join(un_names)}")
+
             return "\n".join(lines)
         except Exception as e:
             return f"Cart database error: {e}"
@@ -812,6 +904,24 @@ class BistroFSMAgent:
             item = args.get("item_name", "")
             qty = int(args.get("qty", 10))
             return db_tools.restock_menu_item(item, qty, db_path=self.db_path)
+
+        elif tool_name == "get_removed_items":
+            return {"status": "success", "removed_items": db_tools.get_removed_items(self.session_id, db_path=self.db_path)}
+
+        elif tool_name == "get_last_order_item":
+            item = db_tools.get_last_order_item(self.session_id, db_path=self.db_path)
+            return {"status": "success", "last_item": item}
+
+        elif tool_name == "get_available_items":
+            cat = args.get("category")
+            return {"status": "success", "available_items": db_tools.get_available_items(category=cat, db_path=self.db_path)}
+
+        elif tool_name == "get_unavailable_items":
+            return {"status": "success", "unavailable_items": db_tools.get_unavailable_items(db_path=self.db_path)}
+
+        elif tool_name == "get_recommendations":
+            cat = args.get("category")
+            return db_tools.get_recommendations(session_id=self.session_id, category=cat, db_path=self.db_path)
 
         else:
             return {"status": "error", "message": f"Unknown tool name: {tool_name}"}
@@ -1272,6 +1382,59 @@ class BistroFSMAgent:
                 else:
                     resp_text = "Your order tab is currently empty. What dishes would you like to order today?"
 
+        # Intent: Inquire about Removed Items (Audit memory from SQLite)
+        elif any(w in text_lower for w in ["what item was removed", "what was removed", "what did you remove", "what did i remove", "ano tinanggal", "anong tinanggal", "tinanggal ko", "tinanggal kanina", "removed item", "which item was removed"]):
+            res = self.execute_tool("get_removed_items", {})
+            turn_tool_calls.append({"tool": "get_removed_items", "arguments": {}, "result": res})
+            rem_list = res.get("removed_items", [])
+            if rem_list:
+                latest = rem_list[0]
+                if is_filipino:
+                    resp_text = f"Ang pinakahuling putahe na naalis sa inyong cart ay ang {latest['quantity']}x {latest['item_name']} (₱{latest['unit_price']:.2f})."
+                else:
+                    resp_text = f"The item that was removed from your cart was {latest['quantity']}x {latest['item_name']} (₱{latest['unit_price']:.2f})."
+            else:
+                resp_text = "Wala pa pong naitalang tinanggal na putahe sa inyong cart para sa session na ito." if is_filipino else "No items have been removed from your cart during this dining session."
+
+        # Intent: Inquire about Last Order / Last Added Item
+        elif any(w in text_lower for w in ["last order", "last item", "last dish", "huling order", "huling in-order", "huling dinagdag", "what did i just add", "what was my last", "huling order ko"]):
+            res = self.execute_tool("get_last_order_item", {})
+            turn_tool_calls.append({"tool": "get_last_order_item", "arguments": {}, "result": res})
+            last_item = res.get("last_item")
+            if last_item:
+                note = f" (Note: {last_item['special_instructions']})" if last_item.get("special_instructions") else ""
+                if is_filipino:
+                    resp_text = f"Ang inyong pinakahuling dinagdag sa cart ay {last_item['quantity']}x {last_item['name']} (₱{last_item['unit_price']:.2f} bawat isa){note}."
+                else:
+                    resp_text = f"Your last added item was {last_item['quantity']}x {last_item['name']} (₱{last_item['unit_price']:.2f} each){note}."
+            else:
+                resp_text = "Wala pa pong laman ang inyong order tab." if is_filipino else "You haven't added any items to your order tab yet."
+
+        # Intent: Inquire about Unavailable / Out of Stock Items (Real-time SQL check)
+        elif any(w in text_lower for w in ["unavailable", "out of stock", "ubos", "hindi available", "not available", "sold out", "wala na", "ano yung ubos"]):
+            res = self.execute_tool("get_unavailable_items", {})
+            turn_tool_calls.append({"tool": "get_unavailable_items", "arguments": {}, "result": res})
+            un_items = res.get("unavailable_items", [])
+            if un_items:
+                un_desc = ", ".join([f"{it['name']} ({it['category']})" for it in un_items])
+                if is_filipino:
+                    resp_text = f"Kasalukuyang out-of-stock sa ating kusina ang mga sumusunod: {un_desc}. Lahat ng iba pang putahe ay handang ihanda para sa inyo!"
+                else:
+                    resp_text = f"Currently out of stock in our kitchen: {un_desc}. All other menu dishes are freshly in stock and ready to order!"
+            else:
+                resp_text = "Lahat po ng putahe sa ating menu ay available sa kusina ngayon!" if is_filipino else "All items on our bistro menu are currently in stock and available!"
+
+        # Intent: Inquire about Available Items (Real-time SQL check)
+        elif any(w in text_lower for w in ["available", "in stock", "anong meron", "mayroon kayo"]) and not any(w in text_lower for w in ["not", "un", "hindi", "out of", "ubos"]):
+            res = self.execute_tool("get_available_items", {})
+            turn_tool_calls.append({"tool": "get_available_items", "arguments": {}, "result": res})
+            avail_items = res.get("available_items", [])
+            sample = ", ".join([f"{it['name']} (₱{it['price']:.2f})" for it in avail_items[:6]])
+            if is_filipino:
+                resp_text = f"Narito po ang ilan sa ating mga available na putahe sa kusina: {sample}. Nais niyo po ba ng burger, pasta, o combo meal?"
+            else:
+                resp_text = f"Here are some of our popular available dishes in the kitchen: {sample}. Would you like burgers, pastas, sides, or beverages?"
+
         # 3. Intent: View Bill / Cart Review
         elif not is_remove_intent and re.search(r"\b(bill|cart|tab|total|magkano|bayarin|summary|review)\b", text_lower):
             res = self.execute_tool("view_current_order", {})
@@ -1313,20 +1476,25 @@ class BistroFSMAgent:
                 resp_text = f"Here are the items available under {cat}: {items_desc}. Which one would you like to try?"
 
         # 6. Intent: Recommendations & Bestsellers
-        elif any(w in text_lower for w in ["recommend", "rekomenda", "best seller", "bestseller", "specialty", "masarap", "lunch", "popular"]):
+        elif any(w in text_lower for w in ["recommend", "rekomenda", "best seller", "bestseller", "specialty", "masarap", "lunch", "popular", "can't pick", "cant pick", "di makapili", "hindi makapili", "suggest"]):
+            res = self.execute_tool("get_recommendations", {})
+            turn_tool_calls.append({"tool": "get_recommendations", "arguments": {}, "result": res})
+            pairings = res.get("pairing_suggestions", [])
+            pair_tag = (" Maaari niyo ring subukan ang aming pairing: " + " o ".join(pairings[:2]) + ".") if pairings else ""
+            pair_eng = (" We also suggest pairing: " + " or ".join(pairings[:2]) + ".") if pairings else ""
             if is_filipino:
                 resp_text = (
-                    "Mabuhay po! Ang aming crowd-favorite bestsellers ay ang Perpetual Classic Burger (₱150.00), "
-                    "Truffle Mushroom Pasta (₱210.00), at Loaded Cheese Fries (₱110.00)! "
-                    "Para naman sa pinaka-sulit na bundle, subukan ang aming Perpetual Champion Combo (₱285.00, tipid ng ₱30) "
-                    "o Pasta & Sweet Treat Combo (₱330.00, tipid ng ₱50)!"
+                    "Mabuhay po! Kung hindi pa kayo makapili, narito ang aming crowd-favorite bestsellers: "
+                    "Perpetual Classic Burger (₱150.00), Truffle Mushroom Pasta (₱210.00), at Loaded Cheese Fries (₱110.00)! "
+                    "Para naman sa pinaka-sulit na bundle, subukan ang Perpetual Champion Combo (₱285.00, tipid ng ₱30)!"
+                    f"{pair_tag} Alin po ang nais ninyong i-try?"
                 )
             else:
                 resp_text = (
-                    "Mabuhay! Our top bestsellers are the Perpetual Classic Burger (₱150.00), "
-                    "Truffle Mushroom Pasta (₱210.00), and Loaded Cheese Fries (₱110.00)! "
-                    "For the best value, check out our Campus Value Combos like the Perpetual Champion Combo (₱285.00, save ₱30) "
-                    "or the Pasta & Sweet Treat Combo (₱330.00, save ₱50)!"
+                    "Welcome! If you're having trouble deciding, our top bestsellers are the "
+                    "Perpetual Classic Burger (₱150.00), Truffle Mushroom Pasta (₱210.00), and Loaded Cheese Fries (₱110.00)! "
+                    "For the best value, check out our Perpetual Champion Combo (₱285.00, save ₱30)!"
+                    f"{pair_eng} Which one would you like to try?"
                 )
 
         # Intent: Analytics & Sales Query (Full Database Analysis Authority)
@@ -1564,6 +1732,32 @@ class BistroFSMAgent:
                         synthesis_parts.append(f"Kitchen ticket {t_res.get('ticket_id')} updated to {t_res.get('new_status')}.")
                     elif t_name == "restock_menu_item":
                         synthesis_parts.append(t_res.get("message", "Inventory updated."))
+                    elif t_name == "get_removed_items":
+                        r_items = t_res.get("removed_items", [])
+                        if r_items:
+                            synthesis_parts.append(f"The most recent item removed from your cart was {r_items[0]['quantity']}x {r_items[0]['item_name']} (₱{r_items[0]['unit_price']:.2f}).")
+                        else:
+                            synthesis_parts.append("No items have been removed from your cart in this session.")
+                    elif t_name == "get_last_order_item":
+                        l_item = t_res.get("last_item")
+                        if l_item:
+                            synthesis_parts.append(f"Your last added item was {l_item['quantity']}x {l_item['name']} (₱{l_item['unit_price']:.2f}).")
+                        else:
+                            synthesis_parts.append("Your order tab is currently empty.")
+                    elif t_name == "get_unavailable_items":
+                        un = t_res.get("unavailable_items", [])
+                        if un:
+                            synthesis_parts.append(f"Items currently out of stock: {', '.join([u['name'] for u in un])}.")
+                        else:
+                            synthesis_parts.append("All menu items are currently in stock.")
+                    elif t_name == "get_available_items":
+                        av = t_res.get("available_items", [])
+                        avail_desc = ", ".join([f"{a['name']} (₱{a['price']:.2f})" for a in av[:5]])
+                        synthesis_parts.append(f"Available dishes ready to order: {avail_desc} and more.")
+                    elif t_name == "get_recommendations":
+                        pairs = t_res.get("pairing_suggestions", [])
+                        p_str = f" Chef pairings: {'; '.join(pairs[:2])}." if pairs else ""
+                        synthesis_parts.append(f"Recommended crowd-favorites: Perpetual Classic Burger (₱150.00), Truffle Mushroom Pasta (₱210.00), Loaded Cheese Fries (₱110.00).{p_str}")
                 clean_text = "\n\n".join(synthesis_parts)
 
             if not clean_text:

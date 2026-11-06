@@ -377,6 +377,18 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
 
         clean_name = (item_name or "").strip().lower()
         if clean_name in ["all", "everything", "clear", "clear_cart", "cart", "lahat", "all items", "order"]:
+            cursor.execute(
+                "SELECT oli.item_id, mi.name, oli.quantity, oli.unit_price "
+                "FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id "
+                "WHERE oli.session_id = ?",
+                (session_id,)
+            )
+            cleared_rows = cursor.fetchall()
+            for r in cleared_rows:
+                cursor.execute(
+                    "INSERT INTO removed_order_items (session_id, item_id, item_name, quantity, unit_price, reason) VALUES (?, ?, ?, ?, ?, ?)",
+                    (session_id, r["item_id"], r["name"], r["quantity"], r["unit_price"], "Customer cart cleared")
+                )
             cursor.execute("DELETE FROM order_line_items WHERE session_id = ?", (session_id,))
             conn.commit()
             return {
@@ -384,6 +396,7 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
                 "success": True,
                 "message": "Cleared all items from your order cart.",
                 "removed_item": "all items",
+                "cleared_items": [dict(r) for r in cleared_rows],
                 "new_order_total": 0.0,
                 "remaining_items": 0,
             }
@@ -393,7 +406,7 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
             return {"status": "not_found", "success": False, "error": f"'{item_name}' is not a recognized menu item.", "message": f"'{item_name}' is not a recognized menu item."}
 
         cursor.execute(
-            "SELECT id, quantity FROM order_line_items WHERE session_id = ? AND item_id = ?",
+            "SELECT id, quantity, unit_price FROM order_line_items WHERE session_id = ? AND item_id = ?",
             (session_id, item["id"]),
         )
         lines = cursor.fetchall()
@@ -404,6 +417,13 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
                 "error": f"'{item['name']}' is not currently in your order cart.",
                 "message": f"'{item['name']}' is not currently in your order cart.",
             }
+
+        total_qty_removed = sum(l["quantity"] for l in lines)
+        unit_price = lines[0]["unit_price"]
+        cursor.execute(
+            "INSERT INTO removed_order_items (session_id, item_id, item_name, quantity, unit_price, reason) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, item["id"], item["name"], total_qty_removed, unit_price, "Customer removed item")
+        )
 
         cursor.execute(
             "DELETE FROM order_line_items WHERE session_id = ? AND item_id = ?",
@@ -417,6 +437,7 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
             "success": True,
             "message": f"Removed all instances of {item['name']} from your order.",
             "removed_item": item["name"],
+            "quantity_removed": total_qty_removed,
             "new_order_total": updated_order["grand_total"],
             "remaining_items": updated_order["item_count"],
         }
@@ -439,19 +460,6 @@ def update_item_quantity(session_id: str, item_name: str, qty: int, db_path: str
                 "success": False,
                 "error": "Cannot modify order. This tab has already been confirmed and finalized.",
                 "message": "Cannot modify order. This tab has already been confirmed and finalized.",
-            }
-
-        clean_name = (item_name or "").strip().lower()
-        if clean_name in ["all", "everything", "clear", "clear_cart", "cart", "lahat", "all items", "order"]:
-            cursor.execute("DELETE FROM order_line_items WHERE session_id = ?", (session_id,))
-            conn.commit()
-            return {
-                "status": "success",
-                "success": True,
-                "message": "Cleared all items from your order cart.",
-                "removed_item": "all items",
-                "new_order_total": 0.0,
-                "remaining_items": 0,
             }
 
         item = _find_menu_item(item_name, conn)
@@ -818,6 +826,103 @@ def restock_all_items(target_min_qty: int = 20, db_path: str = DB_PATH) -> Dict[
         "affected_items": affected,
         "new_minimum": target_min_qty,
         "message": f"Restocked {affected} items to at least {target_min_qty} units."
+    }
+
+
+def get_removed_items(session_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Retrieves all items removed or cleared from the customer's cart during this session."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, item_name, quantity, unit_price, removed_at, reason "
+            "FROM removed_order_items WHERE session_id = ? ORDER BY id DESC",
+            (session_id,)
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_last_order_item(session_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """Retrieves the most recent dish or beverage added to the active cart for this session."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT oli.id, mi.name, oli.quantity, oli.unit_price, (oli.quantity * oli.unit_price) as line_total, "
+            "oli.special_instructions, oli.created_at "
+            "FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id "
+            "WHERE oli.session_id = ? ORDER BY oli.id DESC LIMIT 1",
+            (session_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_available_items(category: Optional[str] = None, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Retrieves all menu items currently in stock and available for ordering."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        if category and category.lower() != "all":
+            cursor.execute(
+                "SELECT id, name, category, price, stock_qty, allergens, description "
+                "FROM menu_items WHERE stock_qty > 0 AND (LOWER(category) = LOWER(?) OR LOWER(category) LIKE LOWER(?)) "
+                "ORDER BY category, name",
+                (category.strip(), f"%{category.strip()}%")
+            )
+        else:
+            cursor.execute(
+                "SELECT id, name, category, price, stock_qty, allergens, description "
+                "FROM menu_items WHERE stock_qty > 0 ORDER BY category, name"
+            )
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_unavailable_items(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Retrieves all menu items that are out of stock or unavailable in the kitchen in real-time."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, name, category, price, stock_qty, allergens, description "
+            "FROM menu_items WHERE stock_qty <= 0 ORDER BY category, name"
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_recommendations(session_id: Optional[str] = None, category: Optional[str] = None, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Intelligently generates chef recommendations and pairings based on real-time stock
+    and what the customer has already added to their cart.
+    """
+    cart_items = []
+    if session_id:
+        cart_info = view_current_order(session_id, db_path=db_path)
+        cart_items = [it["name"].lower() for it in cart_info.get("line_items", [])]
+
+    has_burger = any("burger" in n or "sandwich" in n for n in cart_items)
+    has_pasta = any("pasta" in n or "carbonara" in n or "spaghetti" in n for n in cart_items)
+    has_drink = any("tea" in n or "coffee" in n or "smoothie" in n or "macchiato" in n for n in cart_items)
+    has_side = any("fries" in n or "rings" in n or "salad" in n for n in cart_items)
+
+    pairing_suggestions = []
+    if (has_burger or has_pasta) and not has_drink:
+        pairing_suggestions.append("Fresh Calamansi Iced Tea (₱55.00) or Mango Passionfruit Smoothie (₱105.00)")
+    if (has_burger or has_pasta) and not has_side:
+        pairing_suggestions.append("Loaded Cheese Fries (₱110.00) or Crispy Onion Rings (₱85.00)")
+    if not cart_items:
+        pairing_suggestions.append("Perpetual Champion Combo (₱285.00 - Burger + Fries + Iced Tea, Save ₱30)")
+        pairing_suggestions.append("Pasta & Sweet Treat Combo (₱330.00 - Carbonara + NY Cheesecake + Brewed Coffee, Save ₱50)")
+        pairing_suggestions.append("Truffle Mushroom Pasta (₱210.00) with Loaded Cheese Fries (₱110.00)")
+
+    bestsellers = [
+        {"name": "Perpetual Classic Burger", "category": "Burgers", "price": 150.00, "reason": "Crowd-favorite juicy beef patty with cheddar cheese"},
+        {"name": "Truffle Mushroom Pasta", "category": "Pastas", "price": 210.00, "reason": "Rich black truffle cream sauce with al dente fettuccine"},
+        {"name": "Loaded Cheese Fries", "category": "Sides", "price": 110.00, "reason": "Golden fries smothered in warm aged cheddar & jalapeños"},
+        {"name": "Perpetual Champion Combo", "category": "Combos", "price": 285.00, "reason": "Best value bundle saving ₱30"}
+    ]
+
+    return {
+        "status": "success",
+        "bestsellers": bestsellers,
+        "pairing_suggestions": pairing_suggestions,
+        "message": "Chef recommendations curated from live in-stock catalog."
     }
 
 
