@@ -165,7 +165,12 @@ def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlit
     # 3. Fuzzy & Token Overlap Similarity (handles typos, word reordering, shortened names)
     import difflib
     raw_tokens = set(re.findall(r'\w+', cleaned))
-    stopwords = {"can", "i", "order", "a", "an", "the", "pabili", "gusto", "ko", "ng", "please", "want", "to", "have", "get", "buy", "give", "me", "some", "pwede", "ba"}
+    stopwords = {
+        "can", "i", "order", "a", "an", "the", "pabili", "gusto", "ko", "ng", "please", "want", "to",
+        "have", "get", "buy", "give", "me", "some", "pwede", "ba", "add", "on", "in", "into", "cart",
+        "tab", "my", "our", "sa", "yung", "ang", "mga", "nga", "naman", "po", "paki", "pakidagdag",
+        "isama", "also", "and", "plus", "isa", "isang", "dalawa", "dalawang", "1", "2", "3", "mean"
+    }
     content_tokens = raw_tokens - stopwords
     if not content_tokens or content_tokens.issubset(generic_categories):
         return None
@@ -177,22 +182,22 @@ def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlit
         name_lower = it["name"].lower()
         m_tokens = set(re.findall(r'\w+', name_lower))
 
-        # Token overlap ratio
-        common = raw_tokens.intersection(m_tokens)
-        token_ratio = len(common) / max(len(raw_tokens), 1)
+        # Token overlap ratio based on content tokens
+        common = content_tokens.intersection(m_tokens)
+        token_ratio = len(common) / max(len(content_tokens), 1)
 
         # Sequence matcher ratio (for typos like 'perpetul')
         seq_ratio = difflib.SequenceMatcher(None, cleaned, name_lower).ratio()
 
         # Token-level typo matching
         token_typo_matches = 0
-        for r_tok in raw_tokens:
+        for r_tok in content_tokens:
             if len(r_tok) >= 4:
                 for m_tok in m_tokens:
                     if difflib.SequenceMatcher(None, r_tok, m_tok).ratio() >= 0.70:
                         token_typo_matches += 1
                         break
-        typo_ratio = token_typo_matches / max(len(raw_tokens), 1)
+        typo_ratio = token_typo_matches / max(len(content_tokens), 1)
 
         score = max(token_ratio, seq_ratio, typo_ratio)
 
@@ -456,9 +461,11 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
             "that", "it", "this", "item", "the item", "the only item", "only item",
             "the only 1 item in the cart", "the only 1 item", "the 1 item", "cart item",
             "only 1 item in the cart", "only 1 item", "that in the cart", "that in cart",
-            "item in the cart", "the item in the cart", "the dish", "dish", ""
+            "item in the cart", "the item in the cart", "the dish", "dish", "that one",
+            "the only one", "yung isa", "yung nasa cart", "alisin yan", "tanggalin yan", ""
         ]
-        if clean_name in generic_pronouns:
+        is_generic = clean_name in generic_pronouns or any(p in clean_name for p in ["only 1", "only item", "nasa cart", "that in", "yung isa", "that one"])
+        if is_generic:
             cursor.execute(
                 "SELECT oli.item_id, mi.name FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id WHERE oli.session_id = ?",
                 (session_id,)

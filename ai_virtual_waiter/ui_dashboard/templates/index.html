@@ -4300,8 +4300,9 @@
             scroll.scrollTop = scroll.scrollHeight;
         }
 
-        // TTS Audio Playback
+        // TTS Audio Playback (Dual-Engine: Neural Edge-TTS + 100% Offline Browser SAPI Fallback)
         async function playTtsAudio(speechText) {
+            if (!speechText) return;
             try {
                 const res = await fetch('/api/tts', {
                     method: 'POST',
@@ -4311,14 +4312,33 @@
                         language: currentLanguage
                     })
                 });
-                if (!res.ok) return;
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const audio = document.getElementById('ttsAudioPlayer');
-                audio.src = url;
-                audio.play().catch(e => console.log("Audio autoplay prevented by browser"));
+                if (res.ok) {
+                    const blob = await res.blob();
+                    if (blob && blob.size > 100) {
+                        const url = URL.createObjectURL(blob);
+                        const audio = document.getElementById('ttsAudioPlayer');
+                        audio.src = url;
+                        audio.play().catch(e => console.log("Audio autoplay prevented by browser"));
+                        return;
+                    }
+                }
             } catch(e) {
-                console.error("TTS audio error:", e);
+                console.log("[TTS] Edge-TTS unavailable, engaging offline browser synthesis:", e);
+            }
+
+            // 100% Offline Local Speech Synthesis (SAPI5 / Web Speech)
+            try {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const clean = speechText.replace(/[*_#`⚙️🍽️]/g, '').replace(/₱/g, ' pesos ');
+                    const utter = new SpeechSynthesisUtterance(clean);
+                    utter.rate = 1.0;
+                    utter.pitch = 1.0;
+                    utter.lang = (currentLanguage === 'filipino') ? 'fil-PH' : 'en-US';
+                    window.speechSynthesis.speak(utter);
+                }
+            } catch(sErr) {
+                console.error("[TTS Offline Fallback Error]:", sErr);
             }
         }
 

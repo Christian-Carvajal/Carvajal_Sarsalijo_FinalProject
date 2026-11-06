@@ -361,7 +361,11 @@ DISH_CATALOG = [
         "category": "Burgers",
         "price": 150.0,
         "allergens": ["Dairy", "Gluten"],
-        "aliases": ["perpetual classic burger", "classic burger", "perpetual burger", "classic beef burger"],
+        "aliases": [
+            "perpetual classic burger", "classic burger", "perpetual burger",
+            "classic beef burger", "perpetual classic", "perpetual burger classic",
+            "perpetul burger classic", "perpetul classic", "classic"
+        ],
     },
     {
         "name": "Bacon Mushroom Melt Burger",
@@ -838,9 +842,22 @@ class BistroFSMAgent:
         self._init_system_prompt()
 
     def set_table_number(self, new_table_no: int) -> None:
-        """Updates the active table number."""
+        """Updates the active table number and connects to an active session for that table."""
         self.table_no = new_table_no
-        self.session = db_tools.create_or_get_session(new_table_no, self.session_id, db_path=self.db_path)
+        with db_tools.get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT session_id, status FROM table_sessions WHERE table_no = ? AND status != 'STATE_CONFIRMED' ORDER BY updated_at DESC LIMIT 1",
+                (new_table_no,)
+            )
+            row = cursor.fetchone()
+            if row:
+                self.session_id = row["session_id"]
+                self.state = row["status"]
+            else:
+                new_sess = db_tools.create_or_get_session(new_table_no, db_path=self.db_path)
+                self.session_id = new_sess["session_id"]
+                self.state = new_sess["status"]
         self._init_system_prompt()
 
     def transition_state(self, new_state: str, reason: str = "") -> None:
@@ -917,16 +934,57 @@ class BistroFSMAgent:
                     "message": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket."
                 }
             item = args.get("item_name") or args.get("dish_name") or ""
-            generic_pronouns = ["that", "it", "this", "item", "the item", "the only item", "only item", "the only 1 item in the cart", "the only 1 item", "the 1 item", "cart item", ""]
-            if item.lower().strip() in generic_pronouns:
-                cart_current = db_tools.view_current_order(self.session_id, db_path=self.db_path)
-                cart_items = cart_current.get("line_items", [])
+            cart_current = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            cart_items = cart_current.get("line_items", [])
+
+            # Get user's latest text
+            last_user_text = ""
+            for m in reversed(self.messages):
+                if m.get("role") == "user":
+                    last_user_text = m.get("content", "").lower()
+                    break
+
+            generic_pronouns = [
+                "that", "it", "this", "item", "the item", "the only item", "only item",
+                "the only 1 item in the cart", "the only 1 item", "the 1 item", "cart item",
+                "only 1 item in the cart", "only 1 item", "that in the cart", "that in cart",
+                "item in the cart", "the item in the cart", "the dish", "dish", "that one",
+                "the only one", "yung isa", "yung nasa cart", "alisin yan", "tanggalin yan", ""
+            ]
+            is_generic = (item.lower().strip() in generic_pronouns or
+                          any(p in item.lower() for p in ["only 1", "only item", "that", "this item", "nasa cart", "yung isa", "that one"]) or
+                          any(p in last_user_text for p in ["that in the cart", "only 1 item", "the only item", "remove that", "alisin yan", "the only 1"]))
+
+            # Check if 'item' passed by model matches any item actually in the cart
+            item_in_cart = False
+            for ci in cart_items:
+                if ci["name"].lower() == item.lower().strip() or item.lower().strip() in ci["name"].lower():
+                    item_in_cart = True
+                    item = ci["name"]
+                    break
+
+            # If item is not in cart and customer didn't explicitly utter this dish name:
+            dish_explicitly_typed = len(item.strip()) >= 3 and item.lower().strip() in last_user_text
+            if not item_in_cart and (is_generic or not dish_explicitly_typed):
                 if len(cart_items) == 1:
                     item = cart_items[0]["name"]
                 elif len(cart_items) > 1:
-                    last_i = db_tools.get_last_order_item(self.session_id, db_path=self.db_path).get("last_item")
-                    if last_i:
-                        item = last_i["name"]
+                    if any(w in last_user_text for w in ["all", "everything", "lahat", "clear"]):
+                        item = "all"
+                    else:
+                        last_i = db_tools.get_last_order_item(self.session_id, db_path=self.db_path).get("last_item")
+                        if last_i:
+                            item = last_i["name"]
+                        else:
+                            item = cart_items[-1]["name"]
+                elif len(cart_items) == 0:
+                    return {
+                        "status": "empty_cart",
+                        "success": False,
+                        "error": "Your cart is currently empty. There is nothing to remove.",
+                        "message": "Your cart is currently empty. There is nothing to remove."
+                    }
+
             res = db_tools.remove_item_from_order(self.session_id, item, db_path=self.db_path)
             if res.get("status") == "success":
                 self.transition_state(STATE_TAKING_ORDER, reason=f"Item removed: {item}")
@@ -1161,13 +1219,11 @@ class BistroFSMAgent:
                     extra_messages.append(u_res.get("message", f"Updated {dish['name']} to {qty}."))
 
         # 4. Add Item(s) to Order ONLY IF NOT allergen query AND NOT removing AND NOT updating AND NOT already added:
-        if "add_item_to_order" not in tools_executed and not has_allergen_words and not is_remove_intent and not has_update_verb and (has_explicit_order_verb or not has_question_words):
+        if "add_item_to_order" not in tools_executed and "update_item_quantity" not in tools_executed and not has_allergen_words and not is_remove_intent and not has_update_verb and (has_explicit_order_verb or not has_question_words):
             found_dishes = find_dishes_in_text(user_input)
             if found_dishes:
                 added_dish_names = {(tc.get("arguments", {}).get("item_name") or tc.get("arguments", {}).get("dish_name")) for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
                 for dish, qty, instructions in found_dishes:
-                    if dish["name"] in ["Crispy Buffalo Chicken Tenders", "Crispy Slice Salmon"]:
-                        continue
                     if dish["name"] not in added_dish_names:
                         res = self.execute_tool("add_item_to_order", {
                             "item_name": dish["name"],
@@ -1182,6 +1238,8 @@ class BistroFSMAgent:
                         tools_executed.add("add_item_to_order")
                         if res.get("status") == "success":
                             extra_messages.append(res.get("message", f"Added {qty}x {dish['name']}"))
+                        elif res.get("status") == "out_of_stock":
+                            extra_messages.append(f"{res.get('message')} {res.get('suggestion', '')}".strip())
 
         # 5. Order Confirmation / Checkout (if user asked to confirm or place order)
         confirm_keywords = [
@@ -1202,8 +1260,8 @@ class BistroFSMAgent:
                 elif res.get("message") == "Cannot confirm empty order.":
                     extra_messages.append("Your order tab is currently empty. Please select items from our menu first.")
 
-        # 6. View Current Bill / Tab (only if not already removing or confirming)
-        elif not is_remove_intent and re.search(r"\b(bill|cart|tab|magkano|bayarin|summary|review)\b", text_lower):
+        # 6. View Current Bill / Tab (only if explicitly inquiring about bill/cart and NOT ordering/removing/confirming)
+        elif not is_remove_intent and not has_explicit_order_verb and not any(w in text_lower for w in ["add", "buy", "order", "pabili"]) and re.search(r"\b(bill|tab|magkano|bayarin|summary|review|view cart|show cart|check cart|tingnan ang cart)\b", text_lower):
             if "view_current_order" not in tools_executed and "confirm_order_and_deduct_stock" not in tools_executed:
                 res = self.execute_tool("view_current_order", {})
                 turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
@@ -1801,6 +1859,11 @@ class BistroFSMAgent:
                         except Exception:
                             fn_args = {}
 
+                    call_sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True)}"
+                    if call_sig in executed_signatures:
+                        continue
+                    executed_signatures.add(call_sig)
+
                     tool_result = self.execute_tool(fn_name, fn_args)
                     turn_tool_calls.append({
                         "tool": fn_name,
@@ -1829,11 +1892,21 @@ class BistroFSMAgent:
                             synthesis_parts.append(
                                 f"Added {it.get('quantity', 1)}x {it.get('name', 'item')} to your tab. Subtotal: ₱{t_res.get('new_order_subtotal', 0.0):.2f}. Would you like anything else?"
                             )
+                        elif t_name == "add_item_to_order" and t_res.get("status") == "out_of_stock":
+                            msg = t_res.get("message", "Item is out of stock.")
+                            sugg = t_res.get("suggestion", "")
+                            synthesis_parts.append(f"{msg} {sugg}".strip())
+                        elif t_name == "add_item_to_order" and t_res.get("status") in ["error", "stock_limit_reached"]:
+                            synthesis_parts.append(t_res.get("message", "Cannot modify order."))
                         elif t_name == "remove_item_from_order" and t_res.get("status") == "success":
                             rem = t_res.get("removed_item", "item")
                             rem_count = t_res.get("remaining_items", 0)
                             status_note = "Your cart is now empty." if rem_count == 0 else f"{rem_count} item(s) remain in your cart."
                             synthesis_parts.append(f"Removed {rem} from your order tab. {status_note}")
+                        elif t_name == "remove_item_from_order" and t_res.get("status") == "empty_cart":
+                            synthesis_parts.append("Your cart is currently empty. There is nothing to remove.")
+                        elif t_name == "remove_item_from_order" and t_res.get("status") == "error":
+                            synthesis_parts.append(t_res.get("message", "Cannot modify order."))
                         elif t_name == "confirm_order_and_deduct_stock" and t_res.get("status") == "success":
                             synthesis_parts.append(
                                 f"Order confirmed! Receipt #{t_res.get('receipt_id')} sent to kitchen display for Table #{t_res.get('table_no')}. Subtotal: ₱{t_res.get('subtotal', 0.0):.2f}, Total: ₱{t_res.get('grand_total', 0.0):.2f}."
