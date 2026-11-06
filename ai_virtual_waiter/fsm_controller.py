@@ -219,6 +219,69 @@ BISTRO_TOOLS = [
                 "required": ["new_state"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_cart",
+            "description": "Delete all items and completely reset the customer's active order tab in the database.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_analytics_summary",
+            "description": "Analyze and retrieve executive bistro metrics from SQLite: total revenue, order count, ticket breakdown by status, low-stock warnings, and category statistics.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_kitchen_tickets",
+            "description": "Query live kitchen display system (KDS) tickets from the database, optionally filtered by status ('PREPARING', 'READY', 'SERVED', or 'ALL').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by ticket status ('PREPARING', 'READY', 'SERVED', or 'ALL')."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_kitchen_ticket_status",
+            "description": "Update the preparation lifecycle status of a kitchen ticket in SQLite ('PREPARING', 'READY', 'SERVED').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "string",
+                        "description": "Unique ticket ID (e.g. TICKET-1-XXXXXX)."
+                    },
+                    "new_status": {
+                        "type": "string",
+                        "enum": ["PREPARING", "READY", "SERVED"],
+                        "description": "New kitchen workflow status."
+                    }
+                },
+                "required": ["ticket_id", "new_status"]
+            }
+        }
     }
 ]
 
@@ -567,12 +630,14 @@ class BistroFSMAgent:
             "2. LIVE SQL DATABASE ACCESS & ACCURACY: You have direct visibility and read access to the live SQLite database shown above. "
             "When a customer asks what is on the menu, what you sell, or asks for recommendations, list dishes, exact prices in ₱, and stock availability directly from the SQL database reference. "
             "Do not hallucinate dishes or prices that do not exist in the database.\n"
-            "3. FULL KIOSK PARITY (ALL MANUAL ACTIONS CAN BE DONE VIA CHATBOT):\n"
-            "   - Add items: Invoke `add_item_to_order(item_name, qty, instructions)` when customer orders food/drinks.\n"
-            "   - Update quantity: Invoke `update_item_quantity(item_name, qty)` when customer wants more or fewer of an item (e.g. 'make iced tea 2').\n"
-            "   - Remove items & pronoun resolution: Invoke `remove_item_from_order(item_name)` when customer asks to remove, delete, or cancel an item. "
-            "CRITICAL: If the customer says 'remove that in the cart', 'the only 1 item in the cart', 'cancel it', or 'alisin yan', and there is only 1 item in the active cart, "
-            "immediately call `remove_item_from_order` with that item's name! Do NOT repeatedly ask what dish they want to remove.\n"
+            "3. FULL DATABASE & KIOSK AUTHORITY (READ, WRITE, UPDATE, DELETE, ANALYZE):\n"
+            "   You have complete read, write, update, delete, and analytical authority over the bistro SQLite database:\n"
+            "   - READ: Query live menu, categories, inventory stock, allergen profiles, and kitchen tickets (`get_menu_by_category`, `check_item_allergen`, `check_availability`, `get_kitchen_tickets`).\n"
+            "   - WRITE / INSERT: Add items with custom instructions, create orders, generate kitchen tickets, and commit orders (`add_item_to_order`, `confirm_order_and_deduct_stock`).\n"
+            "   - UPDATE: Modify order quantities, change kitchen ticket statuses, and transition dialogue states (`update_item_quantity`, `update_kitchen_ticket_status`, `set_dialogue_state`).\n"
+            "   - DELETE: Remove individual items from orders, or purge all items from the cart completely (`remove_item_from_order`, `clear_cart`).\n"
+            "   - ANALYZE: Aggregate revenue in PHP, order volume, status breakdowns, and low inventory warnings (`get_analytics_summary`).\n"
+            "   - CONTEXTUAL PRONOUN RESOLUTION: If the customer says 'remove that in the cart', 'the only 1 item in the cart', 'cancel it', or 'alisin yan', and there is only 1 item in the active cart, immediately call `remove_item_from_order` with that item's name! Do NOT repeatedly ask what dish they want to remove.\n"
             "   - View bill / tab summary: When asked about their bill, current tab, or total, call `view_current_order` ONCE to present the receipt.\n"
             "   - Confirm order: When customer is ready to checkout / place order, call `confirm_order_and_deduct_stock` to route ticket to kitchen and deduct inventory.\n"
             "4. CREATOR & DEVELOPER IDENTITY: If a customer, professor, or guest asks who created you, who made you, who programmed you, or who developed you "
@@ -717,6 +782,36 @@ class BistroFSMAgent:
             if res.get("status") == "success":
                 self.transition_state(STATE_CONFIRMED, reason="Order committed and inventory deducted")
             return res
+
+        elif tool_name == "clear_cart":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "error": "Cannot modify order. This tab has already been confirmed and finalized.",
+                    "message": "Cannot modify order. This tab has already been confirmed and finalized."
+                }
+            res = db_tools.remove_item_from_order(self.session_id, "all", db_path=self.db_path)
+            self.transition_state(STATE_TAKING_ORDER, reason="Customer cleared cart")
+            return res
+
+        elif tool_name == "get_analytics_summary":
+            return db_tools.get_analytics_summary(db_path=self.db_path)
+
+        elif tool_name == "get_kitchen_tickets":
+            st = args.get("status")
+            return {"status": "success", "tickets": db_tools.get_kitchen_tickets(status=st, db_path=self.db_path)}
+
+        elif tool_name == "update_kitchen_ticket_status":
+            t_id = args.get("ticket_id", "")
+            n_st = args.get("new_status", "PREPARING")
+            ok = db_tools.update_kitchen_ticket_status(t_id, n_st, db_path=self.db_path)
+            return {"status": "success" if ok else "error", "ticket_id": t_id, "new_status": n_st}
+
+        elif tool_name == "restock_menu_item":
+            item = args.get("item_name", "")
+            qty = int(args.get("qty", 10))
+            return db_tools.restock_menu_item(item, qty, db_path=self.db_path)
 
         else:
             return {"status": "error", "message": f"Unknown tool name: {tool_name}"}
@@ -1234,6 +1329,38 @@ class BistroFSMAgent:
                     "or the Pasta & Sweet Treat Combo (₱330.00, save ₱50)!"
                 )
 
+        # Intent: Analytics & Sales Query (Full Database Analysis Authority)
+        elif any(w in text_lower for w in ["sales", "revenue", "analytics", "kita", "benta", "how much money", "order count", "orders today", "business"]):
+            res = self.execute_tool("get_analytics_summary", {})
+            turn_tool_calls.append({"tool": "get_analytics_summary", "arguments": {}, "result": res})
+            rev = res.get("total_revenue", 0.0)
+            cnt = res.get("total_orders", 0)
+            low = res.get("low_stock_count", 0)
+            if is_filipino:
+                resp_text = (
+                    f"Narito po ang live business analytics mula sa ating SQLite database:\n"
+                    f"• Kabuuang Benta (Revenue): ₱{rev:.2f}\n"
+                    f"• Kabuuang Orders: {cnt} ticket(s)\n"
+                    f"• Low Stock Items: {low} item(s) ang mababa na ang imbentaryo."
+                )
+            else:
+                resp_text = (
+                    f"Here is the live bistro business analytics directly from SQLite:\n"
+                    f"• Total Revenue: ₱{rev:.2f}\n"
+                    f"• Total Orders: {cnt} ticket(s)\n"
+                    f"• Low Stock Inventory: {low} item(s) below threshold."
+                )
+
+        # Intent: Kitchen Display / Tickets Query (Full Database Read Authority)
+        elif any(w in text_lower for w in ["kitchen", "ticket", "tickets", "kds", "kusina", "preparing", "kitchen display"]):
+            res = self.execute_tool("get_kitchen_tickets", {})
+            turn_tool_calls.append({"tool": "get_kitchen_tickets", "arguments": {}, "result": res})
+            tickets = res.get("tickets", [])
+            if is_filipino:
+                resp_text = f"Kasalukuyang may {len(tickets)} kitchen ticket(s) na nakatala sa ating database."
+            else:
+                resp_text = f"There are currently {len(tickets)} kitchen ticket(s) recorded in the live database."
+
         # 7. Intent: Creator & Developer Inquiry
         elif any(w in text_lower for w in ["who created", "who made", "who built", "who programmed", "who developed", "creators", "developer", "developers", "gumawa sa'yo", "gumawa sayo", "gumawa sa iyo", "sino gumawa"]):
             if is_filipino:
@@ -1416,13 +1543,27 @@ class BistroFSMAgent:
                         )
                     elif t_name == "add_item_to_order":
                         synthesis_parts.append(t_res.get("message", "Item updated in your order."))
-                    elif t_name == "remove_item_from_order":
+                    elif t_name in ["remove_item_from_order", "clear_cart"]:
                         synthesis_parts.append(t_res.get("message", "Item removed."))
                     elif t_name == "update_item_quantity":
                         synthesis_parts.append(t_res.get("message", "Item quantity updated."))
                     elif t_name == "get_menu_by_category" and t_res.get("status") == "success":
                         item_names = ", ".join([it['name'] + f" (₱{it['price']:.2f})" for it in t_res.get("items", [])])
                         synthesis_parts.append(f"Here are the items available in {t_res.get('category_queried')}: {item_names}")
+                    elif t_name == "get_analytics_summary" and t_res.get("status") == "success":
+                        synthesis_parts.append(
+                            f"📊 **Bistro Business Analytics Summary**:\n"
+                            f"• Total Revenue: ₱{t_res.get('total_revenue', 0.0):.2f}\n"
+                            f"• Total Orders: {t_res.get('total_orders', 0)}\n"
+                            f"• Low Stock Items Alert: {t_res.get('low_stock_count', 0)} item(s) below threshold"
+                        )
+                    elif t_name == "get_kitchen_tickets" and t_res.get("status") == "success":
+                        t_count = len(t_res.get("tickets", []))
+                        synthesis_parts.append(f"👨‍🍳 Currently tracking {t_count} ticket(s) in the Kitchen Display System.")
+                    elif t_name == "update_kitchen_ticket_status":
+                        synthesis_parts.append(f"Kitchen ticket {t_res.get('ticket_id')} updated to {t_res.get('new_status')}.")
+                    elif t_name == "restock_menu_item":
+                        synthesis_parts.append(t_res.get("message", "Inventory updated."))
                 clean_text = "\n\n".join(synthesis_parts)
 
             if not clean_text:

@@ -375,6 +375,19 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
                 "message": "Cannot modify order. This tab has already been confirmed and finalized.",
             }
 
+        clean_name = (item_name or "").strip().lower()
+        if clean_name in ["all", "everything", "clear", "clear_cart", "cart", "lahat", "all items", "order"]:
+            cursor.execute("DELETE FROM order_line_items WHERE session_id = ?", (session_id,))
+            conn.commit()
+            return {
+                "status": "success",
+                "success": True,
+                "message": "Cleared all items from your order cart.",
+                "removed_item": "all items",
+                "new_order_total": 0.0,
+                "remaining_items": 0,
+            }
+
         item = _find_menu_item(item_name, conn)
         if not item:
             return {"status": "not_found", "success": False, "error": f"'{item_name}' is not a recognized menu item.", "message": f"'{item_name}' is not a recognized menu item."}
@@ -426,6 +439,19 @@ def update_item_quantity(session_id: str, item_name: str, qty: int, db_path: str
                 "success": False,
                 "error": "Cannot modify order. This tab has already been confirmed and finalized.",
                 "message": "Cannot modify order. This tab has already been confirmed and finalized.",
+            }
+
+        clean_name = (item_name or "").strip().lower()
+        if clean_name in ["all", "everything", "clear", "clear_cart", "cart", "lahat", "all items", "order"]:
+            cursor.execute("DELETE FROM order_line_items WHERE session_id = ?", (session_id,))
+            conn.commit()
+            return {
+                "status": "success",
+                "success": True,
+                "message": "Cleared all items from your order cart.",
+                "removed_item": "all items",
+                "new_order_total": 0.0,
+                "remaining_items": 0,
             }
 
         item = _find_menu_item(item_name, conn)
