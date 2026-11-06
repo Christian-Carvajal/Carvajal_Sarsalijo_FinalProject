@@ -504,6 +504,8 @@ class BistroFSMAgent:
             "   - When customer browses menu or asks what you sell, dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING) to inspect live items.\n"
             "   - CRITICAL TOOL POLICY: NEVER invoke `add_item_to_order` if the customer is merely asking questions about allergens, lactose, gluten, dietary ingredients, availability, or prices! Only answer their inquiry. Invoke `add_item_to_order` ONLY when the customer explicitly asks to order, buy, or add the dish to their cart/tab.\n"
             "   - When customer wants to order: invoke `add_item_to_order` with their requested quantity and customizations (STATE_TAKING_ORDER).\n"
+            "   - When customer wants to remove, cancel, or delete an item (e.g. 'remove the iced tea', 'tanggalin ang burger', 'cancel pasta'): invoke `remove_item_from_order` with the item_name (STATE_TAKING_ORDER).\n"
+            "   - When customer wants to change, modify, or update item quantity (e.g. 'change burger to 2', 'make iced tea 3'): invoke `update_item_quantity` with item_name and qty (STATE_TAKING_ORDER).\n"
             "   - When customer asks about their bill, current tab, or summary: call `view_current_order` to present their bill (STATE_REVIEW).\n"
             "   - When customer confirms or says they are ready to finalize: call `confirm_order_and_deduct_stock` (STATE_CONFIRMED).\n"
             "   - You can also call `set_dialogue_state` to transition the state whenever appropriate.\n"
@@ -785,6 +787,8 @@ class BistroFSMAgent:
         has_greeting = bool(re.search(r"\b(hi|hello|mabuhay|kamusta|good morning|good afternoon|good evening)\b", text_lower))
         has_browse_query = bool(re.search(r"\b(what|anong|ano|meron|show|list|menu|options|choices|categories|tignan|tingnan|available|mayroon)\b", text_lower))
         has_order_verb = bool(re.search(r"\b(order|add|buy|get|take|pabili|hingi|gusto|pakidagdag|isama)\b", text_lower))
+        has_remove_verb = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal)\b", text_lower))
+        has_update_verb = bool(re.search(r"\b(change|update|gawing|palitan|make\s+it|set\s+to|increase|decrease)\b", text_lower))
 
         # Post-Confirmation State Lock Guard: Block any modification/cancellation once confirmed
         if self.state == STATE_CONFIRMED:
@@ -896,8 +900,38 @@ class BistroFSMAgent:
             self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
             return turn_data
 
+        # Intent: Remove Item from Order
+        elif found_dishes and has_remove_verb:
+            msgs = []
+            for dish, qty, instructions in found_dishes:
+                res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
+                turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": res})
+                if res.get("status") == "success":
+                    if is_filipino:
+                        msgs.append(f"Naalis ko na po ang {dish['name']} sa inyong order tab.")
+                    else:
+                        msgs.append(f"Removed {dish['name']} from your order tab.")
+                else:
+                    msgs.append(res.get("message", f"Could not remove {dish['name']}."))
+            resp_text = "\n".join(msgs)
+
+        # Intent: Update Item Quantity in Order
+        elif found_dishes and has_update_verb:
+            msgs = []
+            for dish, qty, instructions in found_dishes:
+                res = self.execute_tool("update_item_quantity", {"item_name": dish["name"], "qty": qty})
+                turn_tool_calls.append({"tool": "update_item_quantity", "arguments": {"item_name": dish["name"], "qty": qty}, "result": res})
+                if res.get("status") == "success":
+                    if is_filipino:
+                        msgs.append(f"Na-update ko na po ang dami ng {dish['name']} sa {qty}.")
+                    else:
+                        msgs.append(f"Updated quantity of {dish['name']} to {qty}.")
+                else:
+                    msgs.append(res.get("message", f"Could not update {dish['name']}."))
+            resp_text = "\n".join(msgs)
+
         # 2. Intent: Ordering Dishes (with optional immediate checkout in the same utterance)
-        elif found_dishes and (has_order_verb or not has_browse_query):
+        elif found_dishes and not has_remove_verb and not has_update_verb and (has_order_verb or not has_browse_query):
             added_msgs = []
             for dish, qty, instructions in found_dishes:
                 res = self.execute_tool("add_item_to_order", {
