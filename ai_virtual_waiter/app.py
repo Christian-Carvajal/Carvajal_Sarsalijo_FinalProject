@@ -156,7 +156,7 @@ if HAS_FASTAPI:
         return {
             "session_id": active_agent.session_id,
             "table_no": active_agent.table_no,
-            "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+            "fsm_state": active_agent.state,
             "language": getattr(active_agent, "language", "filipino"),
             "model": active_agent.model,
             "cart": cart,
@@ -177,7 +177,7 @@ if HAS_FASTAPI:
         if lang not in ["filipino", "english"]:
             raise HTTPException(status_code=400, detail="Language must be 'filipino' or 'english'.")
         active_agent.set_language(lang)
-        return {"status": "success", "language": lang, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"status": "success", "language": lang, "fsm_state": active_agent.state}
 
     @app.post("/api/chat")
     def process_chat(req: ChatRequest):
@@ -190,7 +190,7 @@ if HAS_FASTAPI:
             "assistant_response": turn_data.get("assistant_response", ""),
             "response": turn_data.get("assistant_response", ""),
             "speech_text": turn_data.get("assistant_response", ""),
-            "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+            "fsm_state": active_agent.state,
             "tool_calls": turn_data.get("tool_calls", []),
             "engine": turn_data.get("engine", "ollama"),
             "cart": cart,
@@ -207,19 +207,19 @@ if HAS_FASTAPI:
             "instructions": req.instructions or "",
         })
         cart = db_tools.view_current_order(active_agent.session_id)
-        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)}
 
     @app.post("/api/cart/update")
     def update_cart_item(req: CartUpdateRequest):
         res = db_tools.update_item_quantity(active_agent.session_id, req.item_name, req.qty)
         cart = db_tools.view_current_order(active_agent.session_id)
-        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)}
 
     @app.post("/api/cart/remove")
     def remove_cart_item(req: CartUpdateRequest):
         res = db_tools.remove_item_from_order(active_agent.session_id, req.item_name)
         cart = db_tools.view_current_order(active_agent.session_id)
-        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)}
 
     @app.post("/api/table/switch")
     def switch_table_endpoint(req: TableSwitchRequest):
@@ -227,7 +227,7 @@ if HAS_FASTAPI:
         if req.table_no != active_agent.table_no:
             active_agent.set_table_number(req.table_no)
         cart = db_tools.view_current_order(active_agent.session_id)
-        return {"status": "success", "table_no": active_agent.table_no, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"), "cart": cart}
+        return {"status": "success", "table_no": active_agent.table_no, "fsm_state": active_agent.state, "cart": cart}
 
     @app.post("/api/confirm")
     def confirm_order():
@@ -235,7 +235,7 @@ if HAS_FASTAPI:
         db_tools.create_or_get_session(active_agent.table_no, active_agent.session_id)
         res = active_agent.execute_tool("confirm_order_and_deduct_stock", {})
         cart = db_tools.view_current_order(active_agent.session_id)
-        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)}
 
     @app.get("/api/kds/tickets")
     def get_kds_tickets(status: Optional[str] = None):
@@ -279,7 +279,7 @@ if HAS_FASTAPI:
             "result": res,
             "message": res.get("message", "Order confirmed successfully!"),
             "cart": cart,
-            "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+            "fsm_state": active_agent.state,
         }
 
     @app.get("/api/admin/analytics")
@@ -300,7 +300,7 @@ if HAS_FASTAPI:
         table_num = req.table_no or 1
         current_lang = getattr(active_agent, "language", "filipino")
         active_agent = BistroFSMAgent(table_no=table_num, model=DEFAULT_MODEL, language=current_lang)
-        return {"status": "success", "session_id": active_agent.session_id, "table_no": active_agent.table_no, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")}
+        return {"status": "success", "session_id": active_agent.session_id, "table_no": active_agent.table_no, "fsm_state": active_agent.state}
 
     @app.post("/api/tts")
     async def natural_tts_endpoint(req: TTSRequest):
@@ -390,7 +390,7 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "session_id": active_agent.session_id,
                 "table_no": active_agent.table_no,
-                "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+                "fsm_state": active_agent.state,
                 "language": getattr(active_agent, "language", "filipino"),
                 "model": active_agent.model,
                 "cart": cart,
@@ -437,7 +437,7 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
                 "assistant_response": turn_data.get("assistant_response", ""),
                 "response": turn_data.get("assistant_response", ""),
                 "speech_text": turn_data.get("assistant_response", ""),
-                "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+                "fsm_state": active_agent.state,
                 "tool_calls": turn_data.get("tool_calls", []),
                 "engine": turn_data.get("engine", "ollama"),
                 "cart": cart,
@@ -453,26 +453,26 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
                 "instructions": body.get("instructions", ""),
             })
             cart = db_tools.view_current_order(active_agent.session_id)
-            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)})
             return
 
         elif path == "/api/cart/update":
             res = db_tools.update_item_quantity(active_agent.session_id, body.get("item_name", ""), body.get("qty", 1))
             cart = db_tools.view_current_order(active_agent.session_id)
-            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)})
             return
 
         elif path == "/api/cart/remove":
             res = db_tools.remove_item_from_order(active_agent.session_id, body.get("item_name", ""))
             cart = db_tools.view_current_order(active_agent.session_id)
-            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)})
             return
 
         elif path == "/api/confirm":
             db_tools.create_or_get_session(active_agent.table_no, active_agent.session_id)
             res = active_agent.execute_tool("confirm_order_and_deduct_stock", {})
             cart = db_tools.view_current_order(active_agent.session_id)
-            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)})
             return
 
         elif path == "/api/payment/checkout":
@@ -507,7 +507,7 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
                 "result": res,
                 "message": res.get("message", "Order confirmed successfully!"),
                 "cart": cart,
-                "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"),
+                "fsm_state": active_agent.state,
             })
             return
 
@@ -515,13 +515,13 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
             t_num = body.get("table_no", 1)
             active_agent.set_table_number(t_num)
             cart = db_tools.view_current_order(active_agent.session_id)
-            self._send_json({"status": "success", "table_no": active_agent.table_no, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED"), "cart": cart})
+            self._send_json({"status": "success", "table_no": active_agent.table_no, "fsm_state": active_agent.state, "cart": cart})
             return
 
         elif path == "/api/language":
             lang = body.get("language", "filipino").lower().strip()
             active_agent.set_language(lang)
-            self._send_json({"status": "success", "language": lang, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"status": "success", "language": lang, "fsm_state": active_agent.state})
             return
 
         elif path == "/api/kds/status":
@@ -540,7 +540,7 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
         elif path == "/api/reset":
             t_num = body.get("table_no", 1)
             active_agent = BistroFSMAgent(table_no=t_num, model=DEFAULT_MODEL, language=getattr(active_agent, "language", "filipino"))
-            self._send_json({"status": "success", "session_id": active_agent.session_id, "table_no": active_agent.table_no, "fsm_state": res.get("fsm_state", "STATE_CONFIRMED")})
+            self._send_json({"status": "success", "session_id": active_agent.session_id, "table_no": active_agent.table_no, "fsm_state": active_agent.state})
             return
 
         elif path == "/api/tts":

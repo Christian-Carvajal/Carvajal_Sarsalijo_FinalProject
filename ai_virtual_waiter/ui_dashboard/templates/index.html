@@ -3272,7 +3272,7 @@
                     <span class="quick-pill" onclick="sendQuickPrompt('What burger options do you have available?')">🍔 Browse Burgers</span>
                     <span class="quick-pill" onclick="sendQuickPrompt('Does the Perpetual Classic Burger have dairy? I have mild lactose intolerance.')">🥛 Check Dairy Allergen</span>
                     <span class="quick-pill" onclick="sendQuickPrompt('Please add 1 Perpetual Classic Burger with no onions and extra cheese, and 1 Loaded Cheese Fries.')">🍟 Order Burger &amp; Fries</span>
-                    <span class="quick-pill" onclick="sendQuickPrompt('Can you add one Crispy Buffalo Chicken Tenders?')">🍗 Test Out-of-Stock</span>
+                    <span class="quick-pill" style="border: 1.5px solid #F59E0B; background: #FFFBEB; color: #B45309; font-weight: 700;" onclick="handleQuickTestOutOfStock()">🍗 Test Out-of-Stock (Unavailable)</span>
                     <span class="quick-pill" onclick="sendQuickPrompt('What beverages do you have? Add 1 Iced Caramel Macchiato.')">🥤 Order Drink</span>
                     <span class="quick-pill" onclick="sendQuickPrompt('Can I see my current tab and total bill?')">📋 Review Bill</span>
                     <span class="quick-pill" onclick="sendQuickPrompt('Everything looks great, please confirm and place my order.')">✅ Confirm Order</span>
@@ -3949,7 +3949,7 @@
                                     <button class="btn-card-add" onclick="quickAddToCart('${(it.name || '').replace(/'/g, "\\'")}')">+ Add</button>
                                     <button class="btn-card-instant-order" title="1-Click Instant Order & Receipt" onclick="instantPlaceOrder('${(it.name || '').replace(/'/g, "\\'")}')">⚡ Order</button>
                                 ` : `
-                                    <button class="btn-card-add" style="background: #94A3B8; cursor: not-allowed;" onclick="showToast('${(it.name || '').replace(/'/g, "\\'") } is currently out of stock!', '⚠️')">Unavailable</button>
+                                    <button class="btn-card-unavailable" style="background: #EF4444; color: #FFFFFF; font-weight: 800; font-size: 12px; padding: 7px 14px; border-radius: 6px; border: 1.5px solid #DC2626; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 4px rgba(239,68,68,0.25);" onclick="event.stopPropagation(); triggerUnavailableToast('${(it.name || '').replace(/'/g, "\\'")}', ${it.stock_qty});">⚠️ Unavailable</button>
                                 `}
                             </div>
                         </div>
@@ -3962,7 +3962,7 @@
         // Tap card to add
         function handleCardTap(item) {
             if (item.stock_qty <= 0) {
-                showToast(`Sorry, ${item.name} is sold out in our kitchen!`, '⚠️');
+                triggerUnavailableToast(item.name, item.stock_qty);
                 return;
             }
             quickAddToCart(item.name);
@@ -4427,7 +4427,7 @@
                         try {
                             rec.stop();
                         } catch(e) {}
-                    }, 3000);
+                    }, 4000);
                 };
 
                 rec.onstart = () => {
@@ -5079,13 +5079,24 @@
         // Toast Helper
         function showToast(message, icon = '✓') {
             const toast = document.getElementById('toastNotification');
-            document.getElementById('toastIcon').innerText = icon;
-            document.getElementById('toastMessage').innerText = message;
+            if (!toast) return;
+            const iconEl = document.getElementById('toastIcon');
+            const msgEl = document.getElementById('toastMessage');
+            if (iconEl) iconEl.innerText = icon;
+            if (msgEl) msgEl.innerText = message;
             toast.classList.add('show');
             clearTimeout(window._toastTimeout);
             window._toastTimeout = setTimeout(() => {
                 toast.classList.remove('show');
-            }, 3000);
+            }, 4000);
+        }
+        function triggerUnavailableToast(itemName = 'Crispy Buffalo Chicken Tenders', stockQty = 0) {
+            showToast(`⚠️ ${itemName} is currently out of stock (${stockQty} available). Kitchen inventory guardrail active!`, '⚠️');
+        }
+
+        function handleQuickTestOutOfStock() {
+            triggerUnavailableToast('Crispy Buffalo Chicken Tenders', 0);
+            sendQuickPrompt('Can you add one Crispy Buffalo Chicken Tenders?');
         }
     </script>
 </body>
