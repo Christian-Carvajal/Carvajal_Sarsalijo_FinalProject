@@ -170,6 +170,21 @@ if HAS_FASTAPI:
         restock_all: Optional[bool] = False
         target_min: Optional[int] = 20
 
+    class VoiceTranscribeRequest(BaseModel):
+        audio_base64: str
+        language: Optional[str] = "filipino"
+
+    @app.post("/api/voice/transcribe")
+    def transcribe_audio_endpoint(req: VoiceTranscribeRequest):
+        import base64
+        sr_lang = "en-US" if req.language == "english" else "fil-PH"
+        try:
+            wav_bytes = base64.b64decode(req.audio_base64)
+            transcription = speech_engine.transcribe_wav_bytes(wav_bytes, language=sr_lang)
+            return {"status": "success", "text": transcription or "", "message": "" if transcription else "No speech detected."}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     @app.get("/api/session")
     def get_session_info():
         cart = db_tools.view_current_order(active_agent.session_id)
@@ -446,7 +461,27 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", 0))
         body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
 
-        if path == "/api/chat":
+        if path == "/api/voice/transcribe":
+            import base64
+            b64_audio = body.get("audio_base64", "")
+            lang = body.get("language", getattr(active_agent, "language", "filipino"))
+            sr_lang = "en-US" if lang == "english" else "fil-PH"
+
+            if not b64_audio:
+                self._send_json({"status": "error", "message": "No audio payload received."})
+                return
+            try:
+                wav_bytes = base64.b64decode(b64_audio)
+                transcription = speech_engine.transcribe_wav_bytes(wav_bytes, language=sr_lang)
+                if transcription:
+                    self._send_json({"status": "success", "text": transcription})
+                else:
+                    self._send_json({"status": "success", "text": "", "message": "No speech detected. Please speak closer to microphone."})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)})
+            return
+
+        elif path == "/api/chat":
             msg = body.get("message", "")
             t_no = body.get("table_no")
             if t_no and t_no != active_agent.table_no:

@@ -104,6 +104,52 @@ class SpeechEngine:
             print(f"[SpeechEngine] [STT Error]: {e}")
             return ""
 
+    def transcribe_wav_bytes(self, wav_bytes: bytes, language: str = "fil-PH") -> Optional[str]:
+        """
+        Decodes browser-recorded PCM WAV audio bytes and converts them to text string (STT).
+        Supports multi-lingual Filipino Taglish ('fil-PH') and English ('en-US').
+        """
+        if not HAS_SR or not self.recognizer:
+            return None
+        if not wav_bytes or len(wav_bytes) < 44:
+            return None
+
+        import tempfile
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+                tf.write(wav_bytes)
+                tf_name = tf.name
+
+            try:
+                with sr.AudioFile(tf_name) as source:
+                    audio_data = self.recognizer.record(source)
+
+                # Primary recognition attempt
+                try:
+                    text = self.recognizer.recognize_google(audio_data, language=language)
+                    return text.strip()
+                except sr.UnknownValueError:
+                    # If silence or unintelligible, attempt fallback to en-US if language was fil-PH
+                    if language != "en-US":
+                        try:
+                            text = self.recognizer.recognize_google(audio_data, language="en-US")
+                            return text.strip()
+                        except Exception:
+                            pass
+                    return ""
+                except sr.RequestError as e:
+                    print(f"[SpeechEngine] Google STT request error: {e}")
+                    return None
+            finally:
+                if os.path.exists(tf_name):
+                    try:
+                        os.remove(tf_name)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[SpeechEngine] Error transcribing WAV bytes: {e}")
+            return None
+
     async def _generate_edge_tts(self, text: str, output_path: str) -> bool:
         """Synthesizes speech to an MP3 file using Edge-TTS."""
         if not HAS_EDGE_TTS:

@@ -4323,7 +4323,8 @@
         }
 
         // =====================================================================
-        // VOICE INPUT CONTROLLER (Web Speech Recognition API with 3s Silence Timer)
+        // VOICE INPUT CONTROLLER (Web Speech API + Direct Web Audio PCM WAV Fallback)
+        // Fully compatible with Brave Browser, Google Chrome, Microsoft Edge & Offline
         // =====================================================================
         let isKioskRecording = null;
         let voiceSilenceTimer = null;
@@ -4333,6 +4334,176 @@
         let isVoiceSubmitting = false;
         let voiceCancelled = false;
 
+        // Direct Hardware Web Audio PCM WAV Pipeline
+        let isDirectRecording = false;
+        let directMediaStream = null;
+        let directAudioContext = null;
+        let directAudioInput = null;
+        let directProcessor = null;
+        let directAudioBuffers = [];
+
+        function writeWavString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        function encodeWAV(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+
+            writeWavString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeWavString(view, 8, 'WAVE');
+            writeWavString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeWavString(view, 36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                let s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        async function startDirectAudioCapture() {
+            const btn = document.getElementById('voiceBtn');
+            const icon = document.getElementById('voiceMicIcon');
+            const input = document.getElementById('chatInput');
+            const banner = document.getElementById('voiceStatusBanner');
+            const statusText = document.getElementById('voiceStatusText');
+            const countdownBadge = document.getElementById('voiceCountdownBadge');
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showToast("Microphone recording not supported on this device.", "⚠️");
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true }
+                });
+                directMediaStream = stream;
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                directAudioContext = new AudioCtx({ sampleRate: 16000 });
+                directAudioInput = directAudioContext.createMediaStreamSource(stream);
+                directProcessor = directAudioContext.createScriptProcessor(4096, 1, 1);
+                directAudioBuffers = [];
+
+                directProcessor.onaudioprocess = (e) => {
+                    if (!isDirectRecording) return;
+                    const channelData = e.inputBuffer.getChannelData(0);
+                    directAudioBuffers.push(new Float32Array(channelData));
+                };
+
+                directAudioInput.connect(directProcessor);
+                directProcessor.connect(directAudioContext.destination);
+
+                isDirectRecording = true;
+                btn.classList.add('recording');
+                if (icon) icon.innerText = '🔴';
+                if (banner) banner.style.display = 'flex';
+                if (statusText) statusText.innerText = "🎙️ Microphone active! Speak naturally, then tap the red mic button to send order...";
+                if (countdownBadge) {
+                    countdownBadge.innerText = "Tap mic to finish & send";
+                    countdownBadge.classList.add('counting');
+                }
+                input.placeholder = "🎙️ Recording your voice... Tap the red mic button to send order!";
+                showToast("🎙️ Microphone active! Speak your order, then tap the red mic button to send.", "✨");
+
+            } catch (err) {
+                console.error("Direct audio capture failed:", err);
+                showToast("Microphone permission denied: " + err.message, "⚠️");
+            }
+        }
+
+        async function stopDirectAudioCaptureAndSend() {
+            const btn = document.getElementById('voiceBtn');
+            const icon = document.getElementById('voiceMicIcon');
+            const input = document.getElementById('chatInput');
+            const banner = document.getElementById('voiceStatusBanner');
+            const statusText = document.getElementById('voiceStatusText');
+            const countdownBadge = document.getElementById('voiceCountdownBadge');
+
+            isDirectRecording = false;
+            btn.classList.remove('recording');
+            if (icon) icon.innerText = '🎙️';
+            if (statusText) statusText.innerText = "⚡ Transcribing audio with BistroBot SpeechEngine...";
+            if (countdownBadge) countdownBadge.innerText = "Transcribing...";
+            showToast("⚡ Processing your voice order...", "🎙️");
+
+            try {
+                if (directProcessor) directProcessor.disconnect();
+                if (directAudioInput) directAudioInput.disconnect();
+                if (directMediaStream) {
+                    directMediaStream.getTracks().forEach(track => track.stop());
+                }
+                if (directAudioContext && directAudioContext.state !== 'closed') {
+                    await directAudioContext.close();
+                }
+            } catch(e) {}
+
+            let totalSamples = 0;
+            for (let b of directAudioBuffers) totalSamples += b.length;
+            let merged = new Float32Array(totalSamples);
+            let offset = 0;
+            for (let b of directAudioBuffers) {
+                merged.set(b, offset);
+                offset += b.length;
+            }
+
+            if (totalSamples < 16000 * 0.3) {
+                showToast("Recording too brief. Please speak your order before stopping.", "⚠️");
+                if (banner) banner.style.display = 'none';
+                input.placeholder = "Ask BistroBot or tap mic to speak your order...";
+                return;
+            }
+
+            const wavBlob = encodeWAV(merged, 16000);
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const b64 = reader.result.split(',')[1];
+                try {
+                    const res = await fetch('/api/voice/transcribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            audio_base64: b64,
+                            language: currentLanguage
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success' && data.text) {
+                        input.value = data.text;
+                        showToast(`Voice transcribed: "${data.text}"`, "✨");
+                        if (banner) banner.style.display = 'none';
+                        input.placeholder = "Ask BistroBot or tap mic to speak your order...";
+                        setTimeout(() => {
+                            sendChatMessage();
+                        }, 250);
+                    } else {
+                        showToast(data.message || "No audible speech recognized. Please speak closer to microphone.", "⚠️");
+                        if (banner) banner.style.display = 'none';
+                        input.placeholder = "Ask BistroBot or tap mic to speak your order...";
+                    }
+                } catch(err) {
+                    console.error("Transcribe API error:", err);
+                    showToast("Speech service error: " + err.message, "⚠️");
+                    if (banner) banner.style.display = 'none';
+                    input.placeholder = "Ask BistroBot or tap mic to speak your order...";
+                }
+            };
+            reader.readAsDataURL(wavBlob);
+        }
+
         function toggleVoice() {
             const btn = document.getElementById('voiceBtn');
             const icon = document.getElementById('voiceMicIcon');
@@ -4340,14 +4511,14 @@
             const banner = document.getElementById('voiceStatusBanner');
             const statusText = document.getElementById('voiceStatusText');
             const countdownBadge = document.getElementById('voiceCountdownBadge');
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-            if (!SpeechRecognition) {
-                showToast("Voice speech recognition is supported in Google Chrome and Microsoft Edge. Please open in Chrome or Edge.", "⚠️");
+            // 1. If currently recording via Direct Audio Capture, finish and transcribe
+            if (isDirectRecording) {
+                stopDirectAudioCaptureAndSend();
                 return;
             }
 
-            // If already recording, user clicked the mic button to manually finish and send
+            // 2. If currently recording via Web Speech API, finish and send
             if (isRecording) {
                 clearTimeout(voiceSilenceTimer);
                 clearInterval(voiceCountdownInterval);
@@ -4378,12 +4549,23 @@
                 return;
             }
 
+            // 3. Detect Brave Browser (which blocks Google Speech API) or browsers without SpeechRecognition
+            const isBrave = (navigator.brave && typeof navigator.brave.isBrave === 'function') || 
+                            (navigator.userAgent && navigator.userAgent.includes('Brave'));
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (isBrave || !SpeechRecognition) {
+                startDirectAudioCapture();
+                return;
+            }
+
+            // 4. In Chrome / Edge, start SpeechRecognition with automatic fallback to Direct Audio Capture
             try {
                 const rec = new SpeechRecognition();
                 rec.lang = currentLanguage === 'filipino' ? 'fil-PH' : 'en-US';
                 rec.interimResults = true;
                 rec.maxAlternatives = 1;
-                rec.continuous = true; // Stay open continuously; do not cut off when user pauses!
+                rec.continuous = true;
 
                 voiceFinalTranscript = '';
                 voiceInterimTranscript = '';
@@ -4417,8 +4599,6 @@
                     }, 1000);
 
                     voiceSilenceTimer = setTimeout(() => {
-                        // 3 seconds of continuous silence detected!
-                        console.log("3 seconds of silence detected. Finalizing and auto-sending voice order...");
                         isVoiceSubmitting = true;
                         if (countdownBadge) {
                             countdownBadge.innerText = `Sending order... ⚡`;
@@ -4464,7 +4644,6 @@
                             const truncated = fullSpoken.length > 55 ? fullSpoken.substring(0, 52) + '...' : fullSpoken;
                             statusText.innerText = `🎙️ Heard: "${truncated}"`;
                         }
-                        // Reset the 3-second silence countdown on every new word chunk!
                         resetSilenceTimer();
                     }
                 };
@@ -4484,10 +4663,7 @@
                     clearTimeout(voiceSilenceTimer);
                     clearInterval(voiceCountdownInterval);
 
-                    if (e.error === 'no-speech') {
-                        // Keep listening even if brief no-speech
-                        return;
-                    }
+                    if (e.error === 'no-speech') return;
 
                     btn.classList.remove('recording');
                     if (icon) icon.innerText = '🎙️';
@@ -4495,12 +4671,14 @@
                     input.placeholder = "Ask BistroBot or tap mic to speak your order...";
                     isRecording = null;
 
-                    if (e.error === 'not-allowed') {
-                        showToast("Microphone access denied. Please click the site settings icon in your browser to allow microphone access.", "⚠️");
+                    if (e.error === 'network') {
+                        console.log("Speech recognition network error in browser. Switching seamlessly to Direct Audio Capture...");
+                        showToast("Switching to direct microphone audio capture...", "🎙️");
+                        startDirectAudioCapture();
+                    } else if (e.error === 'not-allowed') {
+                        showToast("Microphone access denied. Please click the site settings icon to allow microphone access.", "⚠️");
                     } else if (e.error === 'audio-capture') {
                         showToast("No microphone detected on this device.", "⚠️");
-                    } else if (e.error === 'network') {
-                        showToast("Microphone network service unavailable (Brave/Offline mode). Use the voice demo chips above or type directly below!", "🎙️");
                     } else {
                         showToast("Voice input status: " + e.error, "⚠️");
                     }
@@ -4534,8 +4712,8 @@
                 isRecording = rec;
                 rec.start();
             } catch(err) {
-                console.error("Failed to start speech recognition:", err);
-                showToast("Could not start microphone service: " + err.message, "⚠️");
+                console.error("Failed to start speech recognition, falling back to direct audio capture:", err);
+                startDirectAudioCapture();
             }
         }
 
@@ -4547,6 +4725,15 @@
             if (isRecording) {
                 try { isRecording.stop(); } catch(e){}
                 isRecording = null;
+            }
+            if (isDirectRecording) {
+                isDirectRecording = false;
+                try {
+                    if (directProcessor) directProcessor.disconnect();
+                    if (directAudioInput) directAudioInput.disconnect();
+                    if (directMediaStream) directMediaStream.getTracks().forEach(t => t.stop());
+                    if (directAudioContext && directAudioContext.state !== 'closed') directAudioContext.close();
+                } catch(e) {}
             }
             const btn = document.getElementById('voiceBtn');
             const icon = document.getElementById('voiceMicIcon');
