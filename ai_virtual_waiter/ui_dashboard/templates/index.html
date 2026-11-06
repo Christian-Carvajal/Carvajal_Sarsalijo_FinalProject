@@ -4291,8 +4291,7 @@
             html += `<div>${(text || '').replace(/\n/g, '<br>')}</div>`;
 
             if (toolCalls && toolCalls.length > 0) {
-                const chips = toolCalls.map(tc => `<span class="tool-chip">⚙️ ${tc.tool}()</span>`).join(' ');
-                html += `<div>${chips}</div>`;
+                console.log("[BistroBot Backend Tool Execution Audit]:", toolCalls);
             }
 
             bubble.innerHTML = html;
