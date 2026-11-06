@@ -468,6 +468,74 @@ class BistroFSMAgent:
         self.audit_log: List[Dict[str, Any]] = []
         self._init_system_prompt()
 
+    def _get_live_menu_context(self) -> str:
+        """Directly queries SQLite to produce a complete live menu catalog reference."""
+        try:
+            menu_res = db_tools.get_menu_by_category("all", db_path=self.db_path)
+            items = menu_res.get("items", [])
+            if not items:
+                return "Menu database is currently empty."
+            
+            categories: Dict[str, List[Dict[str, Any]]] = {}
+            for it in items:
+                cat = it.get("category", "Other")
+                categories.setdefault(cat, []).append(it)
+            
+            lines = ["LIVE PERPETUAL BISTRO MENU DATABASE (Direct SQLite Catalog):"]
+            for cat, cat_items in categories.items():
+                lines.append(f"[{cat.upper()}]:")
+                for it in cat_items:
+                    stock_tag = f"IN STOCK ({it['stock_qty']} avail)" if it.get('in_stock') else "OUT OF STOCK (0 avail - suggest alternatives)"
+                    allergens = it.get('allergens', 'None')
+                    lines.append(f"  • {it['name']} - ₱{it['price']:.2f} | {stock_tag} | Allergens: {allergens}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Menu database error: {e}"
+
+    def _get_live_cart_context(self) -> str:
+        """Directly queries SQLite to produce the live cart state for this session."""
+        try:
+            cart = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            lines = [f"LIVE ACTIVE CART FOR TABLE #{self.table_no} (Session: {self.session_id}):"]
+            items = cart.get("line_items", [])
+            if not items:
+                lines.append("  • Cart is currently EMPTY (0 items).")
+            else:
+                lines.append(f"  • Current items ({len(items)} line item(s)):")
+                for idx, it in enumerate(items, 1):
+                    inst = f" [Note: {it['special_instructions']}]" if it.get('special_instructions') else ""
+                    lines.append(f"    {idx}. {it['quantity']}x {it['name']} (₱{it['unit_price']:.2f} each, Line Total: ₱{it['line_total']:.2f}){inst}")
+                lines.append(f"  • Subtotal: ₱{cart.get('subtotal', 0.0):.2f} (12% VAT: ₱{cart.get('vat_12_pct_breakdown', 0.0):.2f}) | Grand Total: ₱{cart.get('grand_total', 0.0):.2f}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Cart database error: {e}"
+
+    def _refresh_dynamic_context(self) -> None:
+        """Refreshes live cart and FSM state in system prompt before every turn."""
+        if not self.messages or self.messages[0]["role"] != "system":
+            self._init_system_prompt()
+            return
+
+        cart_ctx = self._get_live_cart_context()
+        sys_text = self.messages[0]["content"]
+
+        if "LIVE ACTIVE CART FOR TABLE #" in sys_text:
+            sys_text = re.sub(
+                r"LIVE ACTIVE CART FOR TABLE #\d+.*?(?=LIVE PERPETUAL BISTRO MENU|$)",
+                f"{cart_ctx}\n\n",
+                sys_text,
+                flags=re.DOTALL
+            )
+        else:
+            sys_text = f"{cart_ctx}\n\n" + sys_text
+
+        sys_text = re.sub(
+            r"Current FSM State: \w+",
+            f"Current FSM State: {self.state}",
+            sys_text
+        )
+        self.messages[0]["content"] = sys_text
+
     def _init_system_prompt(self) -> None:
         """Constructs the authoritative system prompt with conversational flexibility and guardrails."""
         if self.language == "english":
@@ -482,36 +550,44 @@ class BistroFSMAgent:
                 "NEVER use archaic, deep pure Tagalog (never say 'mesa isa' or 'tatlong punto lima'). Be friendly, natural, and welcoming.\n"
             )
 
+        menu_ctx = self._get_live_menu_context()
+        cart_ctx = self._get_live_cart_context()
+
         system_content = (
             "You are 'BistroBot', the intelligent, friendly, conversational AI table-side waiter at Perpetual Bistro. "
             "You were engineered and created by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
             "3rd-year BS Computer Science (Data Science) students at the University of Perpetual Help System DALTA (UPHSD).\n"
             f"You are actively serving Table #{self.table_no} (Session ID: {self.session_id}).\n\n"
+            f"{cart_ctx}\n\n"
+            f"{menu_ctx}\n\n"
             "NATURAL CONVERSATION & INTELLIGENCE GUIDELINES:\n"
             "1. CONVERSE DYNAMICALLY LIKE CHATGPT: Answer questions spontaneously on the spot in English or natural Taglish. "
             "If a customer chats, asks what you sell ('ano pang iba niyong tinda?', 'what do you offer?'), asks what you personally recommend, "
             "asks for pairing ideas, or asks general dining questions, respond warmly, naturally, and intelligently in your own words. Never sound robotic or scripted.\n"
-            "2. CREATOR & DEVELOPER IDENTITY: If a customer, professor, or guest asks who created you, who made you, who programmed you, or who developed you "
+            "2. LIVE SQL DATABASE ACCESS & ACCURACY: You have direct visibility and read access to the live SQLite database shown above. "
+            "When a customer asks what is on the menu, what you sell, or asks for recommendations, list dishes, exact prices in ₱, and stock availability directly from the SQL database reference. "
+            "Do not hallucinate dishes or prices that do not exist in the database.\n"
+            "3. FULL KIOSK PARITY (ALL MANUAL ACTIONS CAN BE DONE VIA CHATBOT):\n"
+            "   - Add items: Invoke `add_item_to_order(item_name, qty, instructions)` when customer orders food/drinks.\n"
+            "   - Update quantity: Invoke `update_item_quantity(item_name, qty)` when customer wants more or fewer of an item (e.g. 'make iced tea 2').\n"
+            "   - Remove items & pronoun resolution: Invoke `remove_item_from_order(item_name)` when customer asks to remove, delete, or cancel an item. "
+            "CRITICAL: If the customer says 'remove that in the cart', 'the only 1 item in the cart', 'cancel it', or 'alisin yan', and there is only 1 item in the active cart, "
+            "immediately call `remove_item_from_order` with that item's name! Do NOT repeatedly ask what dish they want to remove.\n"
+            "   - View bill / tab summary: When asked about their bill, current tab, or total, call `view_current_order` ONCE to present the receipt.\n"
+            "   - Confirm order: When customer is ready to checkout / place order, call `confirm_order_and_deduct_stock` to route ticket to kitchen and deduct inventory.\n"
+            "4. CREATOR & DEVELOPER IDENTITY: If a customer, professor, or guest asks who created you, who made you, who programmed you, or who developed you "
             "(e.g., 'who created you?', 'sino gumawa sa'yo?', 'who developed you?', 'who are your creators?'), warmly and proudly state that "
             "you were created and engineered by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
             "3rd-year BSCS - Data Science students at the University of Perpetual Help System DALTA, for your AI Finals Project (Perpetual Bistro)! "
             "Always mention both Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo by name.\n"
-            "3. CURRENCY RULE: All prices in Perpetual Bistro are strictly in Philippine Pesos (PHP, ₱). "
+            "5. CURRENCY RULE: All prices in Perpetual Bistro are strictly in Philippine Pesos (PHP, ₱). "
             "Always state prices simply as 'pesos' or '₱' (e.g., '150 pesos' or '₱150.00'). "
             "NEVER say 'Cuban pesos', 'Mexican pesos', or any foreign currency denomination.\n"
-            "4. STATE MACHINE CONTEXT:\n"
+            "6. STATE MACHINE CONTEXT:\n"
             f"   - Current FSM State: {self.state}.\n"
-            "   - When customer browses menu or asks what you sell, dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING) to inspect live items.\n"
             "   - CRITICAL TOOL POLICY: NEVER invoke `add_item_to_order` if the customer is merely asking questions about allergens, lactose, gluten, dietary ingredients, availability, or prices! Only answer their inquiry. Invoke `add_item_to_order` ONLY when the customer explicitly asks to order, buy, or add the dish to their cart/tab.\n"
-            "   - When customer wants to order: invoke `add_item_to_order` with their requested quantity and customizations (STATE_TAKING_ORDER).\n"
-            "   - When customer wants to remove, cancel, or delete an item (e.g. 'remove the iced tea', 'tanggalin ang burger', 'cancel pasta'): invoke `remove_item_from_order` with the item_name (STATE_TAKING_ORDER).\n"
-            "   - When customer wants to change, modify, or update item quantity (e.g. 'change burger to 2', 'make iced tea 3'): invoke `update_item_quantity` with item_name and qty (STATE_TAKING_ORDER).\n"
-            "   - When customer asks about their bill, current tab, or summary: call `view_current_order` to present their bill (STATE_REVIEW).\n"
-            "   - When customer confirms or says they are ready to finalize: call `confirm_order_and_deduct_stock` (STATE_CONFIRMED).\n"
-            "   - You can also call `set_dialogue_state` to transition the state whenever appropriate.\n"
-            "5. TOOL CALLING AUTONOMY: Autonomously call the tools whenever needed to fetch real database data. "
-            "Do not guess or hallucinate menu prices or inventory counts.\n"
-            "6. OUT-OF-STOCK POLICY: If an item is out of stock (such as Crispy Buffalo Chicken Tenders), explain politely and suggest in-stock alternatives from the same category.\n"
+            "   - TOOL CALL COMPLETION: Call each tool at most once per turn. Once you receive the tool response, synthesize your final customer answer immediately.\n"
+            "7. OUT-OF-STOCK POLICY: If an item is out of stock (such as Crispy Buffalo Chicken Tenders), explain politely and suggest in-stock alternatives from the same category.\n"
             + language_rule +
             "8. EMOJI AND SPEECH CLEANLINESS: Do not use emojis in your responses. Keep text clean and verbal so text-to-speech audio speaks words cleanly without describing symbols."
         )
@@ -691,6 +767,7 @@ class BistroFSMAgent:
         has_explicit_order_verb = bool(re.search(r"\b(order|add|pabili|buy|get|take|pakidagdag|isama|paki-order|i-order|dagdag|bilhin)\b", text_lower))
         has_remove_verb = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal)\b", text_lower))
         has_update_verb = bool(re.search(r"\b(change|update|gawing|palitan|make\s+it|set\s+to|increase|decrease)\b", text_lower))
+        is_remove_intent = has_remove_verb or bool(re.search(r"\b(only\s+1\s+item|only\s+item|remove\s+that|remove\s+it|delete\s+that|cancel\s+that|alisin\s+yan|tanggalin\s+yan|tanggal\s+yan)\b", text_lower))
 
         # 1. Allergen Tool Safety Guard: If user asked about allergens and tool wasn't executed:
         if has_allergen_words and "check_item_allergen" not in tools_executed:
@@ -705,18 +782,35 @@ class BistroFSMAgent:
             turn_tool_calls.append({"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": a_res})
             tools_executed.add("check_item_allergen")
 
-        # 2. Remove Item Safety Guard: If user requested removal and tool wasn't executed:
-        if has_remove_verb and "remove_item_from_order" not in tools_executed:
+        # 2. Remove Item Safety Guard (with contextual pronoun resolution from SQLite cart)
+        if is_remove_intent and "remove_item_from_order" not in tools_executed:
             found_dishes_r = find_dishes_in_text(user_input)
-            for dish, qty, instructions in found_dishes_r:
-                r_res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
-                turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": r_res})
-                tools_executed.add("remove_item_from_order")
-                if r_res.get("status") == "success":
-                    extra_messages.append(r_res.get("message", f"Removed {dish['name']} from tab."))
+            if found_dishes_r:
+                for dish, qty, instructions in found_dishes_r:
+                    r_res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
+                    turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": r_res})
+                    tools_executed.add("remove_item_from_order")
+                    if r_res.get("status") == "success":
+                        extra_messages.append(r_res.get("message", f"Removed {dish['name']} from tab."))
+            else:
+                cart_current = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                cart_items = cart_current.get("line_items", [])
+                if len(cart_items) == 1:
+                    target_name = cart_items[0]["name"]
+                    r_res = self.execute_tool("remove_item_from_order", {"item_name": target_name})
+                    turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": target_name}, "result": r_res})
+                    tools_executed.add("remove_item_from_order")
+                    if r_res.get("status") == "success":
+                        extra_messages.append(f"Removed {target_name} from your order tab. Your cart is now empty.")
+                elif len(cart_items) > 1 and any(w in text_lower for w in ["all", "everything", "lahat", "clear", "clear cart"]):
+                    for it in cart_items:
+                        r_res = self.execute_tool("remove_item_from_order", {"item_name": it["name"]})
+                        turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": it["name"]}, "result": r_res})
+                    tools_executed.add("remove_item_from_order")
+                    extra_messages.append("Cleared all items from your order tab.")
 
         # 3. Update Item Quantity Safety Guard:
-        if has_update_verb and not has_remove_verb and "update_item_quantity" not in tools_executed:
+        if has_update_verb and not is_remove_intent and "update_item_quantity" not in tools_executed:
             found_dishes_u = find_dishes_in_text(user_input)
             for dish, qty, instructions in found_dishes_u:
                 u_res = self.execute_tool("update_item_quantity", {"item_name": dish["name"], "qty": qty})
@@ -726,7 +820,7 @@ class BistroFSMAgent:
                     extra_messages.append(u_res.get("message", f"Updated {dish['name']} to {qty}."))
 
         # 4. Add Item(s) to Order ONLY IF NOT allergen query AND NOT removing AND NOT updating:
-        if not has_allergen_words and not has_remove_verb and not has_update_verb and (has_explicit_order_verb or not has_question_words):
+        if not has_allergen_words and not is_remove_intent and not has_update_verb and (has_explicit_order_verb or not has_question_words):
             found_dishes = find_dishes_in_text(user_input)
             if found_dishes:
                 added_dish_names = {tc.get("arguments", {}).get("item_name") for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
@@ -748,7 +842,7 @@ class BistroFSMAgent:
                         if res.get("status") == "success":
                             extra_messages.append(res.get("message", f"Added {qty}x {dish['name']}"))
 
-        # 2. Order Confirmation / Checkout (if user asked to confirm or place order)
+        # 5. Order Confirmation / Checkout (if user asked to confirm or place order)
         confirm_keywords = [
             "confirm", "place my order", "place order", "place the order", "place it",
             "place this", "place na", "paki-place", "paki place", "finalize", "checkout",
@@ -767,8 +861,8 @@ class BistroFSMAgent:
                 elif res.get("message") == "Cannot confirm empty order.":
                     extra_messages.append("Your order tab is currently empty. Please select items from our menu first.")
 
-        # 3. View Current Bill / Tab (only if not already confirming)
-        elif re.search(r"\b(bill|cart|tab|magkano|bayarin|summary|review)\b", text_lower):
+        # 6. View Current Bill / Tab (only if not already removing or confirming)
+        elif not is_remove_intent and re.search(r"\b(bill|cart|tab|magkano|bayarin|summary|review)\b", text_lower):
             if "view_current_order" not in tools_executed and "confirm_order_and_deduct_stock" not in tools_executed:
                 res = self.execute_tool("view_current_order", {})
                 turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
@@ -811,6 +905,7 @@ class BistroFSMAgent:
         has_order_verb = bool(re.search(r"\b(order|add|buy|get|take|pabili|hingi|gusto|pakidagdag|isama)\b", text_lower))
         has_remove_verb = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal)\b", text_lower))
         has_update_verb = bool(re.search(r"\b(change|update|gawing|palitan|make\s+it|set\s+to|increase|decrease)\b", text_lower))
+        is_remove_intent = has_remove_verb or bool(re.search(r"\b(only\s+1\s+item|only\s+item|remove\s+that|remove\s+it|delete\s+that|cancel\s+that|alisin\s+yan|tanggalin\s+yan|tanggal\s+yan)\b", text_lower))
 
         # Post-Confirmation State Lock Guard: Block any modification/cancellation once confirmed
         if self.state == STATE_CONFIRMED:
@@ -922,19 +1017,52 @@ class BistroFSMAgent:
             self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
             return turn_data
 
-        # Intent: Remove Item from Order
-        elif found_dishes and has_remove_verb:
+        # Intent: Remove Item from Order (with contextual pronoun resolution)
+        elif is_remove_intent:
+            cart_current = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            cart_items = cart_current.get("line_items", [])
             msgs = []
-            for dish, qty, instructions in found_dishes:
-                res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
-                turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": res})
+            if found_dishes:
+                for dish, qty, instructions in found_dishes:
+                    res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
+                    turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": res})
+                    if res.get("status") == "success":
+                        if is_filipino:
+                            msgs.append(f"Naalis ko na po ang {dish['name']} sa inyong order tab.")
+                        else:
+                            msgs.append(f"Removed {dish['name']} from your order tab.")
+                    else:
+                        msgs.append(res.get("message", f"Could not remove {dish['name']}."))
+            elif len(cart_items) == 1:
+                target_name = cart_items[0]["name"]
+                res = self.execute_tool("remove_item_from_order", {"item_name": target_name})
+                turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": target_name}, "result": res})
                 if res.get("status") == "success":
                     if is_filipino:
-                        msgs.append(f"Naalis ko na po ang {dish['name']} sa inyong order tab.")
+                        msgs.append(f"Naalis ko na po ang {target_name} sa inyong order tab. Wala na pong laman ang inyong cart.")
                     else:
-                        msgs.append(f"Removed {dish['name']} from your order tab.")
+                        msgs.append(f"Removed {target_name} from your order tab. Your cart is now empty.")
                 else:
-                    msgs.append(res.get("message", f"Could not remove {dish['name']}."))
+                    msgs.append(res.get("message", f"Could not remove {target_name}."))
+            elif len(cart_items) > 1 and any(w in text_lower for w in ["all", "everything", "lahat", "clear", "clear cart"]):
+                for it in cart_items:
+                    res = self.execute_tool("remove_item_from_order", {"item_name": it["name"]})
+                    turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": it["name"]}, "result": res})
+                if is_filipino:
+                    msgs.append("Naalis ko na po ang lahat ng putahe sa inyong cart.")
+                else:
+                    msgs.append("Cleared all items from your order tab.")
+            elif not cart_items:
+                if is_filipino:
+                    msgs.append("Wala pa pong laman ang inyong cart. Walang kailangang alisin.")
+                else:
+                    msgs.append("Your cart is currently empty. There is nothing to remove.")
+            else:
+                items_str = ", ".join([f"{it['quantity']}x {it['name']}" for it in cart_items])
+                if is_filipino:
+                    msgs.append(f"Mayroon po kayong {items_str} sa inyong cart. Alin po sa mga ito ang nais ninyong ipatanggal?")
+                else:
+                    msgs.append(f"You have {items_str} in your cart. Which one would you like me to remove?")
             resp_text = "\n".join(msgs)
 
         # Intent: Update Item Quantity in Order
@@ -1050,7 +1178,7 @@ class BistroFSMAgent:
                     resp_text = "Your order tab is currently empty. What dishes would you like to order today?"
 
         # 3. Intent: View Bill / Cart Review
-        elif re.search(r"\b(bill|cart|tab|total|magkano|bayarin|summary|review)\b", text_lower):
+        elif not is_remove_intent and re.search(r"\b(bill|cart|tab|total|magkano|bayarin|summary|review)\b", text_lower):
             res = self.execute_tool("view_current_order", {})
             turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
             items = res.get("line_items", [])
@@ -1165,6 +1293,7 @@ class BistroFSMAgent:
         """
         Executes a conversational dialogue step with Ollama LLM and seamless automated fallback.
         """
+        self._refresh_dynamic_context()
         self.messages.append({"role": "user", "content": user_input})
         if user_input.strip() == "Hello BistroBot":
             return self._fallback_dialogue_turn(user_input)
@@ -1174,6 +1303,7 @@ class BistroFSMAgent:
         iteration = 0
         final_content = ""
         model_thinking = ""
+        executed_signatures: Set[str] = set()
 
         try:
             while iteration < max_tool_iterations:
@@ -1217,6 +1347,7 @@ class BistroFSMAgent:
 
                 self.messages.append(assistant_msg)
 
+                has_new_execution = False
                 for tc in tool_calls:
                     fn_info = tc.get("function", {})
                     fn_name = fn_info.get("name", "")
@@ -1227,12 +1358,21 @@ class BistroFSMAgent:
                         except Exception:
                             fn_args = {}
 
-                    tool_result = self.execute_tool(fn_name, fn_args)
-                    turn_tool_calls.append({
-                        "tool": fn_name,
-                        "arguments": fn_args,
-                        "result": tool_result,
-                    })
+                    sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True)}"
+                    if sig in executed_signatures:
+                        tool_result = {
+                            "status": "already_executed",
+                            "message": f"{fn_name} was already executed in this turn. Please deliver your response to the customer now."
+                        }
+                    else:
+                        executed_signatures.add(sig)
+                        has_new_execution = True
+                        tool_result = self.execute_tool(fn_name, fn_args)
+                        turn_tool_calls.append({
+                            "tool": fn_name,
+                            "arguments": fn_args,
+                            "result": tool_result,
+                        })
 
                     tool_msg = {
                         "role": "tool",
@@ -1240,6 +1380,9 @@ class BistroFSMAgent:
                         "content": json.dumps(tool_result, ensure_ascii=False)
                     }
                     self.messages.append(tool_msg)
+
+                if not has_new_execution:
+                    break
 
             # Safety guard: ensure critical orders/checkouts execute
             extra_tool_note = self._ensure_critical_tool_execution(user_input, turn_tool_calls)
@@ -1250,9 +1393,13 @@ class BistroFSMAgent:
 
             if not clean_text and turn_tool_calls:
                 synthesis_parts = []
+                rendered_tools = set()
                 for tc in turn_tool_calls:
                     t_name = tc["tool"]
                     t_res = tc["result"]
+                    if t_name in rendered_tools and t_name == "view_current_order":
+                        continue
+                    rendered_tools.add(t_name)
                     if t_name == "confirm_order_and_deduct_stock" and t_res.get("status") == "success":
                         synthesis_parts.append(
                             f"🎉 **Order Confirmed!** (Receipt #{t_res.get('receipt_id')})\n"
@@ -1271,6 +1418,8 @@ class BistroFSMAgent:
                         synthesis_parts.append(t_res.get("message", "Item updated in your order."))
                     elif t_name == "remove_item_from_order":
                         synthesis_parts.append(t_res.get("message", "Item removed."))
+                    elif t_name == "update_item_quantity":
+                        synthesis_parts.append(t_res.get("message", "Item quantity updated."))
                     elif t_name == "get_menu_by_category" and t_res.get("status") == "success":
                         item_names = ", ".join([it['name'] + f" (₱{it['price']:.2f})" for it in t_res.get("items", [])])
                         synthesis_parts.append(f"Here are the items available in {t_res.get('category_queried')}: {item_names}")
