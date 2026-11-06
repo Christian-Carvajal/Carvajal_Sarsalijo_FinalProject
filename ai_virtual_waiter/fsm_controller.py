@@ -411,7 +411,7 @@ def find_dishes_in_text(text: str) -> List[Tuple[Dict[str, Any], int, str]]:
             for m in re.finditer(pattern, text_lower):
                 start, end = m.span()
                 if any(start >= s and end <= e for (s, e) in matched_spans):
-                    continue
+                        continue
                 matched_spans.append((start, end))
 
                 preceding = text_lower[:start].strip()
@@ -481,7 +481,8 @@ class BistroFSMAgent:
             "NEVER say 'Cuban pesos', 'Mexican pesos', or any foreign currency denomination.\n"
             "3. STATE MACHINE CONTEXT:\n"
             f"   - Current FSM State: {self.state}.\n"
-            "   - When customer browses menu or asks about dishes: explore using `get_menu_by_category` or `check_item_allergen` (STATE_MENU_BROWSING).\n"
+            "   - When customer browses menu or asks about dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING).\n"
+            "   - CRITICAL TOOL POLICY: NEVER invoke `add_item_to_order` if the customer is merely asking questions about allergens, lactose, gluten, dietary ingredients, availability, or prices! Only answer their inquiry. Invoke `add_item_to_order` ONLY when the customer explicitly asks to order, buy, or add the dish to their cart/tab.\n"
             "   - When customer wants to order: invoke `add_item_to_order` with their requested quantity and customizations (STATE_TAKING_ORDER).\n"
             "   - When customer asks about their bill, current tab, or summary: call `view_current_order` to present their bill (STATE_REVIEW).\n"
             "   - When customer confirms or says they are ready to finalize: call `confirm_order_and_deduct_stock` (STATE_CONFIRMED).\n"
@@ -627,27 +628,45 @@ class BistroFSMAgent:
         tools_executed = {tc["tool"] for tc in turn_tool_calls}
         extra_messages = []
 
-        # 1. Add Item(s) to Order FIRST if dishes are detected
-        found_dishes = find_dishes_in_text(user_input)
-        if found_dishes:
-            added_dish_names = {tc.get("arguments", {}).get("item_name") for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
-            for dish, qty, instructions in found_dishes:
-                if dish["name"] == "Crispy Buffalo Chicken Tenders":
-                    continue
-                if dish["name"] not in added_dish_names:
-                    res = self.execute_tool("add_item_to_order", {
-                        "item_name": dish["name"],
-                        "qty": qty,
-                        "instructions": instructions
-                    })
-                    turn_tool_calls.append({
-                        "tool": "add_item_to_order",
-                        "arguments": {"item_name": dish["name"], "qty": qty, "instructions": instructions},
-                        "result": res
-                    })
-                    tools_executed.add("add_item_to_order")
-                    if res.get("status") == "success":
-                        extra_messages.append(res.get("message", f"Added {qty}x {dish['name']}"))
+        has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
+        has_question_words = bool(re.search(r"\b(does|is|are|can|what|anong|ano|meron|mayroon|how much|magkano|ingredients|contain)\b", text_lower))
+        has_explicit_order_verb = bool(re.search(r"\b(order|add|pabili|buy|get|take|pakidagdag|isama|paki-order|i-order|dagdag|bilhin)\b", text_lower))
+
+        # 1. Allergen Tool Safety Guard: If user asked about allergens and tool wasn't executed:
+        if has_allergen_words and "check_item_allergen" not in tools_executed:
+            found_dishes_a = find_dishes_in_text(user_input)
+            target_dish = found_dishes_a[0][0]["name"] if found_dishes_a else "Perpetual Classic Burger"
+            target_allergen = "Dairy"
+            for a in ["Gluten", "Nuts", "Egg", "Pork", "Shellfish", "Dairy"]:
+                if a.lower() in text_lower:
+                    target_allergen = a
+                    break
+            a_res = self.execute_tool("check_item_allergen", {"item_name": target_dish, "allergen": target_allergen})
+            turn_tool_calls.append({"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": a_res})
+            tools_executed.add("check_item_allergen")
+
+        # 2. Add Item(s) to Order ONLY IF NOT asking an allergen query AND (explicit order verb OR not an informational question)
+        if not has_allergen_words and (has_explicit_order_verb or not has_question_words):
+            found_dishes = find_dishes_in_text(user_input)
+            if found_dishes:
+                added_dish_names = {tc.get("arguments", {}).get("item_name") for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
+                for dish, qty, instructions in found_dishes:
+                    if dish["name"] == "Crispy Buffalo Chicken Tenders":
+                        continue
+                    if dish["name"] not in added_dish_names:
+                        res = self.execute_tool("add_item_to_order", {
+                            "item_name": dish["name"],
+                            "qty": qty,
+                            "instructions": instructions
+                        })
+                        turn_tool_calls.append({
+                            "tool": "add_item_to_order",
+                            "arguments": {"item_name": dish["name"], "qty": qty, "instructions": instructions},
+                            "result": res
+                        })
+                        tools_executed.add("add_item_to_order")
+                        if res.get("status") == "success":
+                            extra_messages.append(res.get("message", f"Added {qty}x {dish['name']}"))
 
         # 2. Order Confirmation / Checkout (if user asked to confirm or place order)
         confirm_keywords = [
@@ -727,8 +746,61 @@ class BistroFSMAgent:
             self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
             return turn_data
 
-        # 1. Intent: Ordering Dishes (with optional immediate checkout in the same utterance)
-        if found_dishes and (has_order_verb or not has_browse_query):
+        # 1. Intent: Allergen & Dietary Query (Priority 1: Never add to cart!)
+        has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
+        if has_allergen_words:
+            target_dish = found_dishes[0][0]["name"] if found_dishes else "Perpetual Classic Burger"
+            target_allergen = "Dairy"
+            for a in ["Gluten", "Nuts", "Egg", "Pork", "Shellfish", "Dairy"]:
+                if a.lower() in text_lower:
+                    target_allergen = a
+                    break
+
+            res = self.execute_tool("check_item_allergen", {"item_name": target_dish, "allergen": target_allergen})
+            turn_tool_calls.append({"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": res})
+
+            has_allergen = res.get("contains_allergen", False)
+            all_decl = res.get("declared_allergens")
+            all_list = res.get("all_item_allergens", [])
+            allergen_str = all_decl if all_decl else (", ".join(all_list) if all_list else "None")
+
+            if is_filipino:
+                if has_allergen:
+                    resp_text = (
+                        f"Opo, ang {target_dish} ay may {target_allergen} (Kabuuang allergens: {allergen_str}). "
+                        f"Kung may lactose intolerance o dietary restriction po kayo, maaari po nating ipatanggal ang cheese o i-customize ang inyong order!"
+                    )
+                else:
+                    resp_text = f"Wala pong {target_allergen} ang {target_dish}. Ligtas po ito para sa inyo! (Nakatala allergens: {allergen_str})."
+            else:
+                if has_allergen:
+                    resp_text = (
+                        f"Yes, the {target_dish} contains {target_allergen} (Allergens: {allergen_str}). "
+                        f"If you have mild lactose intolerance, we can gladly prepare it without cheese for you!"
+                    )
+                else:
+                    resp_text = f"Good news! The {target_dish} is free of {target_allergen} (Allergens: {allergen_str})."
+
+            if self.state != STATE_CONFIRMED:
+                self.transition_state(STATE_MENU_BROWSING, reason="Customer allergen query")
+
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "turn_index": len(self.messages),
+                "user_input": user_input,
+                "assistant_response": resp_text,
+                "current_state": self.state,
+                "fsm_state": self.state,
+                "tool_calls": turn_tool_calls,
+                "engine": "fallback_deterministic",
+                "reason": "allergen_inquiry",
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 2. Intent: Ordering Dishes (with optional immediate checkout in the same utterance)
+        elif found_dishes and (has_order_verb or not has_browse_query):
             added_msgs = []
             for dish, qty, instructions in found_dishes:
                 if dish["name"] == "Crispy Buffalo Chicken Tenders":
@@ -841,41 +913,7 @@ class BistroFSMAgent:
             else:
                 resp_text = "Your cart is currently empty." if not is_filipino else "Wala pa pong laman ang inyong cart."
 
-        # 4. Intent: Allergen Query
-        elif any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork"]):
-            found_dishes = find_dishes_in_text(user_input)
-            target_dish = found_dishes[0][0]["name"] if found_dishes else "Perpetual Classic Burger"
-            target_allergen = "Dairy"
-            for a in ["Gluten", "Nuts", "Egg", "Pork", "Shellfish"]:
-                if a.lower() in text_lower:
-                    target_allergen = a
-                    break
-
-            res = self.execute_tool("check_item_allergen", {"item_name": target_dish, "allergen": target_allergen})
-            turn_tool_calls.append({"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": res})
-
-            has_allergen = res.get("contains_allergen", False)
-            all_allergens = res.get("all_item_allergens", [])
-            allergen_str = ", ".join(all_allergens) if all_allergens else "None"
-
-            if is_filipino:
-                if has_allergen:
-                    resp_text = (
-                        f"Opo, ang {target_dish} ay may {target_allergen} (Kabuuang allergens: {allergen_str}). "
-                        f"Kung may lactose intolerance o dietary restriction kayo, maaari po nating ipatanggal ang cheese o i-customize ang order!"
-                    )
-                else:
-                    resp_text = f"Wala pong {target_allergen} ang {target_dish}. Ligtas po ito para sa inyo! (Nakatala allergens: {allergen_str})."
-            else:
-                if has_allergen:
-                    resp_text = (
-                        f"Yes, the {target_dish} contains {target_allergen} (Allergens: {allergen_str}). "
-                        f"If you have mild lactose intolerance, we can prepare it without cheese for you!"
-                    )
-                else:
-                    resp_text = f"Good news! The {target_dish} is free of {target_allergen} (Allergens: {allergen_str})."
-
-        # 5. Intent: Category / Menu Inquiry
+        # 4. Intent: Category / Menu Inquiry
         elif any(w in text_lower for w in ["burger", "burgers", "pasta", "pastas", "side", "sides", "drink", "drinks", "beverage", "dessert", "desserts", "combo", "combos", "value meal", "menu"]):
             cat = "all"
             for c in ["Combos", "Burgers", "Pastas", "Sides", "Beverages", "Desserts"]:
