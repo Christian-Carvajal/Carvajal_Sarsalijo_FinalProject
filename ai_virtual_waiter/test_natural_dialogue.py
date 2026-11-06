@@ -70,6 +70,42 @@ class TestNaturalAIDialogue(unittest.TestCase):
         engine = result.get("engine", "ollama")
         self.assertEqual(engine, "ollama", f"Expected engine to be 'ollama', but got '{engine}'.")
 
+    def test_03_creator_inquiry_identifies_both_creators(self):
+        """
+        When asked 'who created you?', BistroBot MUST explicitly identify both
+        Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo.
+        """
+        agent = BistroFSMAgent(table_no=1, db_path=self.temp_db.name, language="english")
+        result = agent.process_turn("who created you?")
+        resp = result.get("assistant_response", "").strip()
+        
+        self.assertTrue(
+            "carvajal" in resp.lower() or "christian" in resp.lower(),
+            f"Expected response to mention Christian Carvajal, got: {resp}"
+        )
+        self.assertTrue(
+            "sarsalijo" in resp.lower() or "john miko" in resp.lower() or "miko" in resp.lower(),
+            f"Expected response to mention John Miko Sarsalijo, got: {resp}"
+        )
+
+    def test_04_tagalog_creator_inquiry_identifies_both_creators(self):
+        """
+        When asked in Tagalog 'sino gumawa sa'yo?', BistroBot MUST explicitly identify both
+        Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo.
+        """
+        agent = BistroFSMAgent(table_no=1, db_path=self.temp_db.name, language="filipino")
+        result = agent.process_turn("sino gumawa sa'yo?")
+        resp = result.get("assistant_response", "").strip()
+        
+        self.assertTrue(
+            "carvajal" in resp.lower() or "christian" in resp.lower(),
+            f"Expected response to mention Christian Carvajal, got: {resp}"
+        )
+        self.assertTrue(
+            "sarsalijo" in resp.lower() or "john miko" in resp.lower() or "miko" in resp.lower(),
+            f"Expected response to mention John Miko Sarsalijo, got: {resp}"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

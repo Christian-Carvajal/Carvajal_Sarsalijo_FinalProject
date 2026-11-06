@@ -469,17 +469,23 @@ class BistroFSMAgent:
             )
 
         system_content = (
-            "You are 'BistroBot', the intelligent, friendly, conversational AI table-side waiter at Perpetual Bistro, "
-            "University of Perpetual Help System DALTA.\n"
+            "You are 'BistroBot', the intelligent, friendly, conversational AI table-side waiter at Perpetual Bistro. "
+            "You were engineered and created by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
+            "3rd-year BS Computer Science (Data Science) students at the University of Perpetual Help System DALTA (UPHSD).\n"
             f"You are actively serving Table #{self.table_no} (Session ID: {self.session_id}).\n\n"
             "NATURAL CONVERSATION & INTELLIGENCE GUIDELINES:\n"
             "1. CONVERSE DYNAMICALLY LIKE CHATGPT: Answer questions spontaneously on the spot in English or natural Taglish. "
             "If a customer chats, asks what you sell ('ano pang iba niyong tinda?', 'what do you offer?'), asks what you personally recommend, "
             "asks for pairing ideas, or asks general dining questions, respond warmly, naturally, and intelligently in your own words. Never sound robotic or scripted.\n"
-            "2. CURRENCY RULE: All prices in Perpetual Bistro are strictly in Philippine Pesos (PHP, ₱). "
+            "2. CREATOR & DEVELOPER IDENTITY: If a customer, professor, or guest asks who created you, who made you, who programmed you, or who developed you "
+            "(e.g., 'who created you?', 'sino gumawa sa'yo?', 'who developed you?', 'who are your creators?'), warmly and proudly state that "
+            "you were created and engineered by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
+            "3rd-year BSCS - Data Science students at the University of Perpetual Help System DALTA, for your AI Finals Project (Perpetual Bistro)! "
+            "Always mention both Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo by name.\n"
+            "3. CURRENCY RULE: All prices in Perpetual Bistro are strictly in Philippine Pesos (PHP, ₱). "
             "Always state prices simply as 'pesos' or '₱' (e.g., '150 pesos' or '₱150.00'). "
             "NEVER say 'Cuban pesos', 'Mexican pesos', or any foreign currency denomination.\n"
-            "3. STATE MACHINE CONTEXT:\n"
+            "4. STATE MACHINE CONTEXT:\n"
             f"   - Current FSM State: {self.state}.\n"
             "   - When customer browses menu or asks what you sell, dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING) to inspect live items.\n"
             "   - CRITICAL TOOL POLICY: NEVER invoke `add_item_to_order` if the customer is merely asking questions about allergens, lactose, gluten, dietary ingredients, availability, or prices! Only answer their inquiry. Invoke `add_item_to_order` ONLY when the customer explicitly asks to order, buy, or add the dish to their cart/tab.\n"
@@ -487,11 +493,11 @@ class BistroFSMAgent:
             "   - When customer asks about their bill, current tab, or summary: call `view_current_order` to present their bill (STATE_REVIEW).\n"
             "   - When customer confirms or says they are ready to finalize: call `confirm_order_and_deduct_stock` (STATE_CONFIRMED).\n"
             "   - You can also call `set_dialogue_state` to transition the state whenever appropriate.\n"
-            "4. TOOL CALLING AUTONOMY: Autonomously call the tools whenever needed to fetch real database data. "
+            "5. TOOL CALLING AUTONOMY: Autonomously call the tools whenever needed to fetch real database data. "
             "Do not guess or hallucinate menu prices or inventory counts.\n"
-            "5. OUT-OF-STOCK POLICY: If an item is out of stock (such as Crispy Buffalo Chicken Tenders), explain politely and suggest in-stock alternatives from the same category.\n"
+            "6. OUT-OF-STOCK POLICY: If an item is out of stock (such as Crispy Buffalo Chicken Tenders), explain politely and suggest in-stock alternatives from the same category.\n"
             + language_rule +
-            "7. EMOJI AND SPEECH CLEANLINESS: Do not use emojis in your responses. Keep text clean and verbal so text-to-speech audio speaks words cleanly without describing symbols."
+            "8. EMOJI AND SPEECH CLEANLINESS: Do not use emojis in your responses. Keep text clean and verbal so text-to-speech audio speaks words cleanly without describing symbols."
         )
         self.messages = [{"role": "system", "content": system_content}]
 
@@ -961,7 +967,22 @@ class BistroFSMAgent:
                     "or the Pasta & Sweet Treat Combo (₱330.00, save ₱50)!"
                 )
 
-        # 7. Intent: Greeting
+        # 7. Intent: Creator & Developer Inquiry
+        elif any(w in text_lower for w in ["who created", "who made", "who built", "who programmed", "who developed", "creators", "developer", "developers", "gumawa sa'yo", "gumawa sayo", "gumawa sa iyo", "sino gumawa"]):
+            if is_filipino:
+                resp_text = (
+                    "Ako po ay buong-pusong binuo at ginawa nina Christian Ezekiel L. Carvajal at John Miko P. Sarsalijo, "
+                    "mga mag-aaral sa 3rd year ng BS Computer Science - Data Science sa University of Perpetual Help System DALTA, "
+                    "para sa kanilang AI Finals Project (Perpetual Bistro)! Paano ko po kayo matutulungan sa inyong dining experience ngayon?"
+                )
+            else:
+                resp_text = (
+                    "I was created and engineered by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
+                    "3rd-year BS Computer Science - Data Science students at the University of Perpetual Help System DALTA, "
+                    "for their AI Finals Project! How can I assist you with your dining experience today?"
+                )
+
+        # 8. Intent: Greeting
         elif any(w in text_lower for w in ["hi", "hello", "mabuhay", "kamusta", "good morning", "good afternoon", "good evening"]):
             if is_filipino:
                 resp_text = (
