@@ -595,6 +595,87 @@ def find_dishes_in_text(text: str) -> List[Tuple[Dict[str, Any], int, str]]:
     return results
 
 
+def check_ambiguous_category_request(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Detects if the customer is asking about a general food/drink category rather than a specific dish.
+    Returns the category details and dish options to prompt clarification before adding to cart.
+    """
+    text_lower = text.lower().strip()
+
+    # Specific dish identifiers (if present, the request is not ambiguous)
+    has_specific_dish = any(spec in text_lower for spec in [
+        "classic", "perpetual", "bacon", "mushroom", "melt", "pesto", "tender", "buffalo",
+        "truffle", "bolognese", "spaghetti", "carbonara", "pan-seared", "crispy slice", "seared",
+        "loaded", "golden", "onion ring", "caesar", "macchiato", "caramel",
+        "brewed", "calamansi", "iced tea", "smoothie", "mango", "lava", "chocolate", "cheesecake",
+        "champion", "sweet treat", "executive", "study fuel", "duo"
+    ])
+    if has_specific_dish:
+        return None
+
+    # Check for general order opening
+    if re.fullmatch(r"(can\s+i\s+order\??|pwede\s+ba\s+umorder\??|order\s+po\??|i\s+want\s+to\s+order\??|may\s+i\s+order\??|order\??)", text_lower):
+        return {
+            "type": "general_order",
+            "message": "Yes, of course! You can order anytime. What dishes or drinks would you like from our menu? We have delicious burgers, pastas, sides, desserts, beverages, and combo meals!"
+        }
+
+    categories = [
+        {
+            "patterns": [r"\bburgers?\b", r"\bhamburgers?\b"],
+            "category": "Burgers",
+            "prompt": "Certainly! We offer multiple burgers on our menu: Perpetual Classic Burger (₱150.00) and Bacon Mushroom Melt Burger (₱185.00). Which burger would you like to order?"
+        },
+        {
+            "patterns": [r"\bpastas?\b", r"\bnoodles?\b"],
+            "category": "Pastas",
+            "prompt": "Sure! Here are our pasta options: Truffle Mushroom Pasta (₱210.00), Classic Spaghetti Bolognese (₱175.00), and Creamy Carbonara (₱190.00). Which one would you prefer?"
+        },
+        {
+            "patterns": [r"\bdrinks?\b", r"\bbeverages?\b", r"\binumin\b", r"\brefreshments?\b"],
+            "category": "Beverages",
+            "prompt": "We offer several refreshing beverages: Fresh Calamansi Iced Tea (₱55.00), Iced Caramel Macchiato (₱95.00), Classic Brewed Coffee (₱60.00), and Mango Passionfruit Smoothie (₱105.00). Which drink would you like?"
+        },
+        {
+            "patterns": [r"\bcoffees?\b", r"\bkape\b"],
+            "category": "Beverages",
+            "prompt": "For coffee lovers, we have Classic Brewed Coffee (₱60.00) and Iced Caramel Macchiato (₱95.00). Which one would you like?"
+        },
+        {
+            "patterns": [r"\bfries\b", r"\bfrench\s+fries\b"],
+            "category": "Sides",
+            "prompt": "We offer two types of fries: Loaded Cheese Fries (₱110.00) and Golden French Fries (₱75.00). Which one would you prefer?"
+        },
+        {
+            "patterns": [r"\bsalmon\b"],
+            "category": "Pastas",
+            "prompt": "We have two salmon specialties: Pan-Seared Salmon (₱240.00) and Crispy Slice Salmon (₱220.00). Which one would you like to try?"
+        },
+        {
+            "patterns": [r"\bdesserts?\b", r"\bcakes?\b", r"\bmatamis\b"],
+            "category": "Desserts",
+            "prompt": "For dessert, we offer Molten Lava Chocolate Cake (₱125.00) and Classic New York Cheesecake (₱135.00). Which sweet treat would you like?"
+        },
+        {
+            "patterns": [r"\bcombos?\b", r"\bvalue\s+meals?\b", r"\bbundles?\b"],
+            "category": "Combos",
+            "prompt": "We have several value combos: Perpetual Champion Combo (₱285.00), Pasta & Sweet Treat Combo (₱330.00), Executive Chefs' Special Duo (₱420.00), and Late Night Study Fuel Combo (₱210.00). Which combo would you like?"
+        },
+        {
+            "patterns": [r"\bsides?\b", r"\bside\s+dish\b"],
+            "category": "Sides",
+            "prompt": "Here are our side dishes: Loaded Cheese Fries (₱110.00), Golden French Fries (₱75.00), Crispy Onion Rings (₱85.00), and Garden Fresh Caesar Salad (₱130.00). Which side would you like?"
+        }
+    ]
+
+    for cat in categories:
+        for pat in cat["patterns"]:
+            if re.search(pat, text_lower):
+                return cat
+
+    return None
+
+
 class BistroFSMAgent:
     """
     Stateful Conversational Finite State Machine Agent.
@@ -736,6 +817,7 @@ class BistroFSMAgent:
             f"{menu_ctx}\n\n"
             "ACTION MANDATE (REAL-TIME DATABASE & FUNCTION CALLING RULES):\n"
             "- When customer wants to buy, order, or add an item (e.g. 'i want to buy perpetual burger', 'add on cart the perpetual classic', 'pabili ng burger', '1 burger and iced tea'): YOU MUST call `add_item_to_order`. Never just say you added it in text without calling the tool!\n"
+            "- AMBIGUOUS DISH POLICY: If the customer asks for a generic category without specifying the exact dish (e.g. 'can i order a burger?', 'can i order pasta?', 'order drinks', 'pabili ng kape'), DO NOT arbitrarily add a dish to the cart! Instead, present the available options in that category (e.g. Perpetual Classic Burger vs Bacon Mushroom Melt Burger) and ask which one they prefer.\n"
             "- When customer wants to remove or cancel an item (e.g. 'can you remove that in the cart?', 'remove it', 'alisin yan', 'the only 1 item in the cart'): look at the active cart above and immediately call `remove_item_from_order` with the item name from the cart! Do NOT ask what item to remove if there is only 1 item in the cart; execute the tool immediately!\n"
             "- When customer asks for recommendations, suggestions, or pairings (e.g. 'what can you suggest for me?', 'ano masarap?', 'di ako makapili'): call `get_recommendations()` or recommend crowd favorites directly.\n"
             "- When customer asks for the bill, total, receipt, or cart summary (e.g. 'bill please', 'magkano na bill ko?', 'view cart'): call `view_current_order()`.\n"
@@ -976,6 +1058,20 @@ class BistroFSMAgent:
         text_lower = user_input.lower()
         tools_executed = {tc["tool"] for tc in turn_tool_calls}
         extra_messages = []
+
+        # Ambiguous Category & General Order Guard (Ask first before adding):
+        ambig = check_ambiguous_category_request(user_input)
+        if ambig:
+            if ambig.get("type") == "general_order":
+                return ambig["message"]
+            cat_name = ambig.get("category")
+            if cat_name and "get_menu_by_category" not in tools_executed:
+                m_res = self.execute_tool("get_menu_by_category", {"category": cat_name})
+                turn_tool_calls.append({"tool": "get_menu_by_category", "arguments": {"category": cat_name}, "result": m_res})
+                tools_executed.add("get_menu_by_category")
+                if self.state != STATE_CONFIRMED:
+                    self.transition_state(STATE_MENU_BROWSING, reason=f"Customer inquiring about {cat_name} options")
+                return ambig["prompt"]
 
         # Creator Identity Guard (Defense Standard):
         creator_keywords = ["who created you", "who made you", "who programmed you", "who developed you", "who are your creators", "sino gumawa sa'yo", "sino gumawa sayo", "sino gumawa"]

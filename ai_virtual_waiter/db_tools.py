@@ -134,6 +134,16 @@ def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlit
     raw = item_query.strip()
     cleaned = re.sub(r'^(the|a|an|yung|ang|mga)\s+', '', raw, flags=re.IGNORECASE).strip().lower()
 
+    # Block generic food categories from returning a single arbitrary dish
+    generic_categories = {
+        "burger", "burgers", "pasta", "pastas", "drink", "drinks", "beverage", "beverages",
+        "inumin", "coffee", "kape", "side", "sides", "fries", "french fries", "dessert", "desserts",
+        "cake", "cakes", "matamis", "salmon", "combo", "combos", "value meal", "sandwich", "sandwiches",
+        "food", "pagkain", "meal", "meals"
+    }
+    if cleaned in generic_categories:
+        return None
+
     # Fetch all menu items
     cursor.execute("SELECT * FROM menu_items")
     all_items = cursor.fetchall()
@@ -155,6 +165,11 @@ def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlit
     # 3. Fuzzy & Token Overlap Similarity (handles typos, word reordering, shortened names)
     import difflib
     raw_tokens = set(re.findall(r'\w+', cleaned))
+    stopwords = {"can", "i", "order", "a", "an", "the", "pabili", "gusto", "ko", "ng", "please", "want", "to", "have", "get", "buy", "give", "me", "some", "pwede", "ba"}
+    content_tokens = raw_tokens - stopwords
+    if not content_tokens or content_tokens.issubset(generic_categories):
+        return None
+
     best_item = None
     best_score = 0.0
 
