@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Perpetual Bistro - 3-Minute Video Walkthrough Script</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 12mm 15mm;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1E293B;
+            background: #FFFFFF;
+            margin: 0;
+            padding: 0;
+            font-size: 11pt;
+            line-height: 1.45;
+        }
+        .header-banner {
+            width: 100%;
+            max-height: 75px;
+            object-fit: contain;
+            display: block;
+            margin-bottom: 12px;
+        }
+        .title-block {
+            border-bottom: 3px solid #7B1113;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+        .title-block h1 {
+            color: #7B1113;
+            font-size: 17pt;
+            margin: 0 0 4px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .title-block .subtitle {
+            color: #64748B;
+            font-size: 10.5pt;
+            font-weight: 600;
+        }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-left: 4px solid #D4AF37;
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-bottom: 14px;
+            font-size: 9.5pt;
+        }
+        .meta-item {
+            margin: 2px 0;
+        }
+        .meta-item strong {
+            color: #7B1113;
+        }
+        .script-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 10pt;
+        }
+        .script-table th {
+            background: #7B1113;
+            color: #FFFFFF;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 9.5pt;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .script-table td {
+            border-bottom: 1px solid #E2E8F0;
+            padding: 9px 10px;
+            vertical-align: top;
+        }
+        .script-table tr:nth-child(even) td {
+            background: #FDFDFD;
+        }
+        .time-badge {
+            display: inline-block;
+            background: #FEF3C7;
+            color: #92400E;
+            font-weight: 700;
+            font-size: 9pt;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #FCD34D;
+            white-space: nowrap;
+        }
+        .nav-cue {
+            background: #EFF6FF;
+            border-left: 3px solid #3B82F6;
+            padding: 5px 8px;
+            border-radius: 0 4px 4px 0;
+            font-size: 9pt;
+            color: #1E40AF;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .voice-line {
+            color: #0F172A;
+            font-size: 10pt;
+            line-height: 1.45;
+        }
+        .voice-line strong {
+            color: #7B1113;
+        }
+        .tip-box {
+            margin-top: 14px;
+            padding: 8px 12px;
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+            border-radius: 4px;
+            font-size: 9pt;
+            color: #78350F;
+        }
+        .tip-box strong {
+            color: #92400E;
+        }
+    </style>
+</head>
+<body>
+
+    <img src="C:/Users/chris/Downloads/06_GlobalResources/TEMPLATES/PERPETUAL/assets/uphsd_header.png" alt="University of Perpetual Help System DALTA" class="header-banner">
+
+    <div class="title-block">
+        <h1>3-Minute Video Walkthrough Script</h1>
+        <div class="subtitle">Lesson 7 Final Project (Milestone 2) — Perpetual Bistro AI Virtual Waiter</div>
+    </div>
+
+    <div class="meta-grid">
+        <div class="meta-item"><strong>Speaker (Voiceover):</strong> Christian Ezekiel L. Carvajal</div>
+        <div class="meta-item"><strong>Navigator (On-Screen Kiosk):</strong> John Miko P. Sarsalijo</div>
+        <div class="meta-item"><strong>Course & Section:</strong> BSCS 3112 — Artificial Intelligence (3rd Year)</div>
+        <div class="meta-item"><strong>Target Length:</strong> Strictly 3 Minutes (180s) | Word Count: ~400 words</div>
+    </div>
+
+    <table class="script-table">
+        <thead>
+            <tr>
+                <th style="width: 13%;">Time</th>
+                <th style="width: 37%;">Miko's Screen Action (What to Click)</th>
+                <th style="width: 50%;">Christian's Spoken Lines (What to Say)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="time-badge">0:00 - 0:30</span><br><small style="color: #64748B;">System Intro</small></td>
+                <td>
+                    <div class="nav-cue">1. Start on Home Landing (http://localhost:8000).</div>
+                    <div class="nav-cue">2. Hover Table #1 badge and Taglish button.</div>
+                    <div class="nav-cue">3. Click "⚡ ORDER NOW" to enter Kiosk.</div>
+                </td>
+                <td class="voice-line">
+                    "Good day, Sir Rob! I am <strong>Christian Carvajal</strong>, and with me is <strong>John Miko Sarsalijo</strong>. Today, we are presenting our Milestone 2 Final Project: <strong>Perpetual Bistro</strong>, an autonomous AI virtual waiter and table ordering kiosk.<br><br>
+                    Our entire application runs <strong>100% locally on laptop edge hardware</strong> using SQLite and a local Qwen 2.5 language model. It requires zero cloud APIs, keeping all student dining data secure and fully functional offline."
+                </td>
+            </tr>
+
+            <tr>
+                <td><span class="time-badge">0:30 - 1:00</span><br><small style="color: #64748B;">Menu & Filters</small></td>
+                <td>
+                    <div class="nav-cue">1. Click category pills: "Burgers", "Pastas", "Combos".</div>
+                    <div class="nav-cue">2. Toggle "Dairy-Free" or "Gluten-Free" dietary filter.</div>
+                    <div class="nav-cue">3. Point cursor to allergen warning badges on dishes.</div>
+                </td>
+                <td class="voice-line">
+                    "On the kiosk surface, customers can explore twenty-one authentic Perpetual Bistro dishes across six categories. Each dish pulls directly from our relational SQLite database, complete with live inventory counts and allergen profiles.<br><br>
+                    Students can filter instantly by category or apply dietary filters like gluten-free or dairy-free, ensuring safe choices for anyone with campus food allergies."
+                </td>
+            </tr>
+
+            <tr>
+                <td><span class="time-badge">1:00 - 1:35</span><br><small style="color: #64748B;">Cart & Custom</small></td>
+                <td>
+                    <div class="nav-cue">1. Click "+ Add" on Perpetual Classic Burger.</div>
+                    <div class="nav-cue">2. Hit the "+" button in cart to increase qty to 2.</div>
+                    <div class="nav-cue">3. Click "⚙️" on Truffle Mushroom Pasta, check "Extra Cheese", and click "Add to Order".</div>
+                </td>
+                <td class="voice-line">
+                    "Next, let us place an order. Miko adds our best-selling <strong>Perpetual Classic Burger</strong> to the tab and increments the quantity to two. Notice the subtotal and VAT update in real time.<br><br>
+                    Customers can also personalize their meal. Clicking the gear button opens chef instructions. Miko adds <strong>Truffle Mushroom Pasta</strong> with extra cheese. The kitchen instructions bind cleanly to the order line item."
+                </td>
+            </tr>
+
+            <tr>
+                <td><span class="time-badge">1:35 - 2:00</span><br><small style="color: #64748B;">Out of Stock</small></td>
+                <td>
+                    <div class="nav-cue">1. Scroll to Crispy Buffalo Chicken Tenders.</div>
+                    <div class="nav-cue">2. Click the gray "Unavailable" button.</div>
+                    <div class="nav-cue">3. Show warning toast: "Item out of stock (0 available)".</div>
+                </td>
+                <td class="voice-line">
+                    "Now, observe our programmatic inventory guardrail. The <strong>Crispy Buffalo Chicken Tenders</strong> are marked out-of-stock in our database.<br><br>
+                    When Miko tries to add them, the system rejects the request immediately with an on-screen warning toast. This prevents overselling and protects database transactional consistency."
+                </td>
+            </tr>
+
+            <tr>
+                <td><span class="time-badge">2:00 - 2:25</span><br><small style="color: #64748B;">AI Waiter FSM</small></td>
+                <td>
+                    <div class="nav-cue">1. Click "💬 AI Waiter" in top navigation bar.</div>
+                    <div class="nav-cue">2. Point to FSM State Badge: "STATE_TAKING_ORDER".</div>
+                    <div class="nav-cue">3. Click quick pill: "🥛 Check Dairy Allergen" or type inquiry. Show BistroBot reply.</div>
+                </td>
+                <td class="voice-line">
+                    "Switching to the <strong>AI Waiter</strong> tab, we meet BistroBot. Notice the finite state machine badge tracking our active conversation state.<br><br>
+                    BistroBot parses customer intents, answers allergen inquiries, and recommends pairings in natural conversational Taglish, with all tool calls strictly validated before execution."
+                </td>
+            </tr>
+
+            <tr>
+                <td><span class="time-badge">2:25 - 3:00</span><br><small style="color: #64748B;">Checkout & KDS</small></td>
+                <td>
+                    <div class="nav-cue">1. Click "🍽️ Order Kiosk" -> "CONFIRM & PLACE ORDER".</div>
+                    <div class="nav-cue">2. Click "Simulate GCash Scan & Pay". Show digital receipt.</div>
+                    <div class="nav-cue">3. Click Split Bill "2x" (₱255/person). Close modal.</div>
+                    <div class="nav-cue">4. Click "👨‍🍳 Kitchen KDS". Show live order ticket ready.</div>
+                </td>
+                <td class="voice-line">
+                    "Finally, we complete checkout. Miko selects GCash payment. The system commits the ACID transaction, decrements inventory stock, and generates an official digital receipt.<br><br>
+                    Students can even split the bill with one click. Closing the receipt and opening the <strong>Kitchen Display System</strong>, ticket number PB-1 appears live for the kitchen staff to prepare.<br><br>
+                    That concludes our Milestone 2 walkthrough. Thank you, Sir Rob!"
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="tip-box">
+        <strong>Rehearsal Tip for Christian & Miko:</strong> Keep your speaking pace steady at ~130 words per minute. Miko can keep this PDF open on a second monitor or tablet while navigating Chrome on the primary laptop. This achieves the exact 3-minute mark required by the rubric without awkward pauses.
+    </div>
+
+</body>
+</html>

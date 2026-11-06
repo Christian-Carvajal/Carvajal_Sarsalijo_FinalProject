@@ -3945,11 +3945,11 @@
                             <span class="food-price">₱${it.price.toFixed(2)}</span>
                             <div class="food-actions-cluster">
                                 ${!isOutOfStock ? `
-                                    <button class="btn-card-customize" title="Customize Special Instructions" onclick="openCustomModal('${it.name}')">⚙️</button>
-                                    <button class="btn-card-add" onclick="quickAddToCart('${it.name}')">+ Add</button>
-                                    <button class="btn-card-instant-order" title="1-Click Instant Order & Receipt" onclick="instantPlaceOrder('${it.name}')">⚡ Order</button>
+                                    <button class="btn-card-customize" title="Customize Special Instructions" onclick="openCustomModal('${(it.name || '').replace(/'/g, "\\'")}')">⚙️</button>
+                                    <button class="btn-card-add" onclick="quickAddToCart('${(it.name || '').replace(/'/g, "\\'")}')">+ Add</button>
+                                    <button class="btn-card-instant-order" title="1-Click Instant Order & Receipt" onclick="instantPlaceOrder('${(it.name || '').replace(/'/g, "\\'")}')">⚡ Order</button>
                                 ` : `
-                                    <button class="btn-card-add" style="background: #94A3B8; cursor: not-allowed;" onclick="showToast('${it.name} is currently out of stock!', '⚠️')">Unavailable</button>
+                                    <button class="btn-card-add" style="background: #94A3B8; cursor: not-allowed;" onclick="showToast('${(it.name || '').replace(/'/g, "\\'") } is currently out of stock!', '⚠️')">Unavailable</button>
                                 `}
                             </div>
                         </div>
@@ -4099,6 +4099,7 @@
             items.forEach(it => {
                 const row = document.createElement('div');
                 row.className = 'cart-item-row';
+                const safeName = (it.name || '').replace(/'/g, "\\'");
                 row.innerHTML = `
                     <div class="cart-row-top">
                         <div>
@@ -4110,10 +4111,10 @@
                     <div class="cart-row-bottom">
                         <span class="cart-unit-price">₱${it.unit_price.toFixed(2)} each</span>
                         <div class="cart-qty-controls">
-                            <button class="btn-qty-adj" onclick="updateItemQuantity('${it.name}', ${it.quantity - 1})">-</button>
+                            <button class="btn-qty-adj" onclick="updateItemQuantity('${safeName}', ${it.quantity - 1})">-</button>
                             <span class="cart-qty-num">${it.quantity}</span>
-                            <button class="btn-qty-adj" onclick="updateItemQuantity('${it.name}', ${it.quantity + 1})">+</button>
-                            <button class="btn-cart-remove" title="Remove Item" onclick="removeItemFromCart('${it.name}')">×</button>
+                            <button class="btn-qty-adj" onclick="updateItemQuantity('${safeName}', ${it.quantity + 1})">+</button>
+                            <button class="btn-cart-remove" title="Remove Item" onclick="removeItemFromCart('${safeName}')">×</button>
                         </div>
                     </div>
                 `;
@@ -4129,9 +4130,19 @@
                     body: JSON.stringify({item_name: itemName, qty: newQty})
                 });
                 const data = await res.json();
+                if (data.result && (data.result.status === 'insufficient_stock' || data.result.status === 'error')) {
+                    showToast(data.result.message || 'Cannot modify quantity.', '⚠️');
+                    return;
+                }
                 renderCart(data.cart);
+                if (newQty > 0) {
+                    showToast(`Updated ${itemName} quantity to ${newQty}`, '🛒');
+                } else {
+                    showToast(`Removed ${itemName} from your tab`, '🗑️');
+                }
             } catch(e) {
                 console.error("Cart quantity update failed:", e);
+                showToast("Failed to update quantity.", "⚠️");
             }
         }
 
@@ -4185,13 +4196,13 @@
 
         // Receipt Modal
         function showReceiptModal(receipt) {
-            if (!receipt || receipt.status !== 'success') return;
-            document.getElementById('recId').innerText = receipt.receipt_id;
-            document.getElementById('recTable').innerText = `Table #${receipt.table_no}`;
+            if (!receipt || (receipt.status !== 'success' && !receipt.receipt_id)) return;
+            document.getElementById('recId').innerText = receipt.receipt_id || 'PB-ORDER';
+            document.getElementById('recTable').innerText = `Table #${receipt.table_no || currentTableNo}`;
             document.getElementById('recTime').innerText = new Date().toLocaleString();
-            document.getElementById('recSubtotal').innerText = `₱${receipt.subtotal.toFixed(2)}`;
-            document.getElementById('recVat').innerText = `₱${receipt.vat_included.toFixed(2)}`;
-            document.getElementById('recTotal').innerText = `₱${receipt.grand_total.toFixed(2)}`;
+            document.getElementById('recSubtotal').innerText = `₱${(receipt.subtotal || 0).toFixed(2)}`;
+            document.getElementById('recVat').innerText = `₱${(receipt.vat_included || 0).toFixed(2)}`;
+            document.getElementById('recTotal').innerText = `₱${(receipt.grand_total || 0).toFixed(2)}`;
 
             // Payment verification badge
             const payBadge = document.getElementById('recPaymentBadge');
@@ -4207,14 +4218,14 @@
 
             const itemsList = document.getElementById('recItemsList');
             itemsList.innerHTML = '';
-            (receipt.itemized_receipt || []).forEach(it => {
+            (receipt.itemized_receipt || receipt.line_items || []).forEach(it => {
                 const row = document.createElement('div');
                 row.style.display = 'flex';
                 row.style.justifyContent = 'space-between';
                 row.style.marginBottom = '4px';
                 row.innerHTML = `
                     <span>${it.quantity}x ${it.name} ${it.special_instructions ? `(${it.special_instructions})` : ''}</span>
-                    <span>₱${it.line_total.toFixed(2)}</span>
+                    <span>₱${(it.line_total || 0).toFixed(2)}</span>
                 `;
                 itemsList.appendChild(row);
             });
@@ -4886,14 +4897,21 @@
                     })
                 });
                 const data = await res.json();
-                if (data.status === 'success') {
+                const receiptObj = data.receipt || data.result;
+                const isSuccess = data.status === 'success' || (receiptObj && (receiptObj.status === 'success' || receiptObj.success));
+                if (isSuccess) {
                     renderCart(data.cart);
                     updateFsmBadge(data.fsm_state);
-                    showReceiptModal(data.receipt);
+                    if (receiptObj) {
+                        receiptObj.payment_method = receiptObj.payment_method || method;
+                        receiptObj.payment_ref = receiptObj.payment_ref || ref;
+                        showReceiptModal(receiptObj);
+                    }
                     fetchKdsTickets();
                     showToast(`Order confirmed via ${method}! Kitchen ticket dispatched.`, '🎉');
                 } else {
-                    showToast(data.message || 'Payment checkout aborted.', '⚠️');
+                    const errMsg = data.message || (receiptObj && (receiptObj.message || receiptObj.error)) || 'Payment checkout aborted.';
+                    showToast(errMsg, '⚠️');
                 }
             } catch(e) {
                 console.error("Payment checkout failed:", e);

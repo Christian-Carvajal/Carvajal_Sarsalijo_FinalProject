@@ -7,6 +7,10 @@ FINAL_SUBMISSION/
 *.docx
 *.zip
 
+# Allow deliverable report & script in ai_virtual_waiter
+!ai_virtual_waiter/*.pdf
+!ai_virtual_waiter/*.docx
+
 # Python Bytecode & Cache
 __pycache__/
 *.py[cod]

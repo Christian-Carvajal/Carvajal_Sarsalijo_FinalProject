@@ -4,16 +4,21 @@
 **Institution:** University of Perpetual Help System DALTA — Las Piñas Campus  
 **Instructor:** Prof. Rob Malitao  
 **Authors / Team Members:**
-- **Christian Ezekiel L. Carvajal** — BSCS - DS 3rd Year (Student ID: Lead Systems Architect & Driver)
-- **John Miko P. Sarsalijo** — BSCS - DS 3rd Year (Student ID: Fullstack Lead & Driver)
+- **Christian Ezekiel L. Carvajal** — BSCS - DS 3rd Year (Lead Systems Architect & Driver)
+- **John Miko P. Sarsalijo** — BSCS - DS 3rd Year (Fullstack Lead & Navigator)
 **Execution Window:** October 19 – November 6, 2026  
 **Final Project Due Date:** November 6, 2026 | **Live Defense:** November 7, 2026
 
 ---
 
-## Video Walkthrough Demonstration
-- **Demonstration Link:** `https://youtu.be/[YOUR_3_MINUTE_VIDEO_WALKTHROUGH_LINK]` *(3–5 Minute End-to-End Voice & Kiosk Demonstration)*
-- **Demonstration Coverage:** Full voice transaction flow from table greeting, voice ordering, dietary allergen checking, manual cart override (+, -, Delete), KDS kitchen dispatch, and out-of-stock edge case handling.
+## 📹 Video Walkthrough Demonstration (Milestone 2 Requirement)
+- **Demonstration Link:** `https://youtu.be/[SUBMIT_YOUR_3_MINUTE_WALKTHROUGH_VIDEO_LINK_HERE]` *(Student 3–5 Minute End-to-End Voice & Kiosk Recording Placeholder)*
+- **Walkthrough Outline:**
+  1. **Table Greeting & Session Init (0:00 - 0:45)**: Kiosk boots on Table #1, vocal welcome via Taglish TTS.
+  2. **Menu Browsing & Allergen Inquiries (0:45 - 1:45)**: Dynamic querying of burger offerings and lactose/gluten allergen checks.
+  3. **Multi-Turn Ordering & Customization (1:45 - 2:30)**: Voice-adding dishes with instructions (`Extra Cheese, No Onions`).
+  4. **Programmatic Inventory Guardrail (2:30 - 3:15)**: Out-of-stock rejection on Crispy Buffalo Chicken Tenders with automated menu substitution recommendations.
+  5. **Human-in-the-Loop Override & KDS Checkout (3:15 - 4:15)**: Manual quantity manipulation (+, -, Delete), transaction confirmation, digital receipt generation, and KDS fulfillment routing.
 
 ---
 
@@ -22,10 +27,10 @@
 Perpetual Bistro, the primary on-campus dining facility at the University of Perpetual Help System DALTA (UPHSD), requires an autonomous, table-side digital ordering kiosk to streamline dining operations during peak campus meal hours. 
 
 To guarantee absolute institutional privacy, zero cloud subscription overhead, and operational resilience against campus network outages, the system runs **100% locally on edge laptop hardware**. It synthesizes:
-1. **Local Speech Processing (STT / TTS)**: Voice input capture and Taglish neural voice synthesis.
-2. **Conversational State Machine (FSM)**: Strict, deterministic dialogue lifecycle enforcing business rules.
+1. **Local Speech Processing (STT / TTS)**: Voice input capture and Taglish neural voice synthesis (`speech_engine.py`).
+2. **Conversational State Machine (FSM)**: Strict, deterministic dialogue lifecycle enforcing business rules (`fsm_controller.py`).
 3. **Agentic Tool Calling**: Dynamic binding between local Ollama (`qwen2.5`) reasoning and SQLite relational tools.
-4. **Relational Data Integrity**: Real-time ACID transactions managing menu inventory, active cart tabs, and Kitchen Display System (KDS) routing.
+4. **Relational Data Integrity**: Real-time ACID transactions managing menu inventory, active cart tabs, and Kitchen Display System (KDS) routing (`db_tools.py` -> `restaurant.db`).
 
 ```
 +-----------------------------------------------------------------------------------------+
@@ -45,7 +50,7 @@ To guarantee absolute institutional privacy, zero cloud subscription overhead, a
                                            ▼
 +-----------------------------------------------------------------------------------------+
 |                        3. RELATIONAL PERSISTENCE LAYER (SQLite)                         |
-|   [ menu_items (21 items) ]   [ table_sessions ]   [ order_line_items ]  [ kds_tickets ] |
+|   [ menu_items (21 items) ]   [ table_sessions ]   [ order_line_items ]  [ kitchen_tickets ] |
 +-----------------------------------------------------------------------------------------+
 ```
 
@@ -78,103 +83,26 @@ Single source of truth implemented in SQLite:
 
 ---
 
-## 3. Finite State Machine State Transition Diagram
+## 3. Tandem Collaboration & Task Matrix (Driver / Navigator Rotation)
 
-```mermaid
-stateDiagram-v2
-    [*] --> STATE_GREETING : Customer Arrives at Table
-    
-    STATE_GREETING --> STATE_MENU_BROWSING : "What is on the menu?" / "Any recommendations?"
-    STATE_GREETING --> STATE_TAKING_ORDER : "I want to order a burger"
-    
-    STATE_MENU_BROWSING --> STATE_TAKING_ORDER : "Add 2 Perpetual Classic Burgers"
-    STATE_MENU_BROWSING --> STATE_MENU_BROWSING : Inquire about ingredients / allergens
-    
-    STATE_TAKING_ORDER --> STATE_TAKING_ORDER : Add / remove items / modify instructions
-    STATE_TAKING_ORDER --> STATE_REVIEW : "How much is my bill?" / "Review my order"
-    
-    STATE_REVIEW --> STATE_TAKING_ORDER : "Wait, add one iced tea" (Customer edits tab)
-    STATE_REVIEW --> STATE_CONFIRMED : "Everything is correct, confirm my order"
-    
-    STATE_CONFIRMED --> [*] : Kitchen Ticket Dispatched (Cart Locked)
-```
-
----
-
-## 4. Programmatic Guardrails & Edge-Case Handling
-
-The architecture includes defensive guardrails designed specifically to withstand the instructor's panel stress tests:
-
-| Stress Test / Edge Case | Failure Mode in Unchecked Agents | Programmatic Guardrail Implemented in Perpetual Bistro | Verification Outcome |
+| Milestone / Subsystem | Driver (Primary Author) | Navigator (Logic & Review) | Deliverable Artifact |
 | :--- | :--- | :--- | :--- |
-| **Out-of-Stock Item** (e.g. Crispy Buffalo Chicken Tenders, stock = 0) | Agent promises unavailable food; inventory goes negative or crashes at kitchen checkout. | `db_tools.add_item_to_order()` queries `stock_qty` before executing insert. If `stock_qty == 0`, transaction is rejected; system queries available dishes in same category and instructs agent to offer them. | **Blocked**: Order refused, alternatives suggested. |
-| **Quantity Exceeds Stock** (Customer requests 5, but stock = 2) | Silent truncation or partial commits leaving cart inconsistent. | Code compares requested quantity against `stock_qty`. Rejects mutation with explicit notification: *"Only 2 left in stock"*. | **Blocked**: User notified of remaining stock. |
-| **Post-Confirmation Mutation Attempt** | Diner tries to modify or cancel dishes after the kitchen has started preparation. | FSM Controller checks `table_sessions.status`. Once in `STATE_CONFIRMED`, all mutation tools (`add`, `update`, `remove`) are hard-locked, returning: *"Order #X is already confirmed and sent to kitchen"*. | **Blocked**: Modifications rejected with explanation. |
-| **Illegal State Shortcuts** (Jumping from `GREETING` to `CONFIRMED`) | Customer says "Bill please" before adding anything to their cart. | Transition guards verify `cart_items.count > 0` before allowing transition into `STATE_REVIEW` or `STATE_CONFIRMED`. Empty checkout attempts return friendly prompt to order first. | **Blocked**: Premature checkout prevented. |
-| **Out-of-Domain Query Injection** ("What is the weather today?", "Write a poem") | Agent hallucinates, deviates into irrelevant topics, and forgets conversation state. | System prompt boundary conditions and regex intent guards politely reject off-topic questions and re-anchor diner to Perpetual Bistro menu selections. | **Protected**: Polite redirect back to food service. |
+| **Milestone 1: Database & Tool CRUD** | Christian Ezekiel L. Carvajal | John Miko P. Sarsalijo | `restaurant_db.sql`, `init_db.py`, `db_tools.py` |
+| **Milestone 1: FSM State Machine** | John Miko P. Sarsalijo | Christian Ezekiel L. Carvajal | `fsm_controller.py` |
+| **Milestone 1: Decoupled Speech I/O** | Christian Ezekiel L. Carvajal | John Miko P. Sarsalijo | `speech_engine.py`, `cli_waiter.py` |
+| **Milestone 2: UI Dashboard & KDS** | John Miko P. Sarsalijo | Christian Ezekiel L. Carvajal | `ui_dashboard/`, `index.html` |
+| **Milestone 2: Main Application Pipeline** | Christian Ezekiel L. Carvajal | John Miko P. Sarsalijo | `app.py` |
+| **Milestone 2: Report & Mathematical Proofs** | Christian Ezekiel L. Carvajal | John Miko P. Sarsalijo | `Carvajal_Sarsalijo_FinalProject_Report.pdf` |
 
 ---
 
-## 5. Tandem Pair Programming Collaboration Log
+## 4. Live Defense Edge Case Scenarios (Faculty Panel Protocol)
 
-In accordance with the Extreme Programming (XP) Pair Programming standard required by UPHSD AI Department:
+The system is fortified against the two mandatory defense stress tests:
 
-### Milestone 1 (Oct 19 – Oct 28, 2026) — 40% Weight
-* **Driver:** Christian Ezekiel L. Carvajal
-* **Navigator:** John Miko P. Sarsalijo
-* **Focus Modules:** SQLite schema (`init_restaurant_db.sql`), DB CRUD engine (`db_tools.py`), FSM state controller (`fsm_controller.py`), and decoupled speech engine (`speech_engine.py`).
-* **Tactical Output:**
-  - Designed relational database schema with foreign keys, cascading constraints, and 21 authentic UPHSD menu items.
-  - Implemented atomic stock reservation transactions with automated rollback on concurrency conflicts.
-  - Built `fsm_controller.py` enforcing strict transitions across all 5 dialogue states.
-  - Engineered `speech_engine.py` with STT audio capture and phonetic Taglish TTS normalization.
-* **Navigator Feedback (Sarsalijo):**
-  - Added multi-model fallback to support 8GB student laptops running `qwen2.5:1.5b`.
-  - Audited SQLite edge cases, verifying zero errors when querying out-of-stock items.
-
-### Milestone 2 (Oct 29 – Nov 06, 2026) — 60% Weight
-* **Driver:** John Miko P. Sarsalijo
-* **Navigator:** Christian Ezekiel L. Carvajal
-* **Focus Modules:** Web UI Dashboard (`ui_dashboard/`), Dish Customization Modal, Live KDS Queue, Payment Integration, and `app.py`.
-* **Tactical Output:**
-  - Built commercial tablet ordering dashboard themed in Perpetual Maroon (`#7B1113`) & Imperial Gold (`#D4AF37`).
-  - Created Kitchen Display System (KDS) board with live ticket lifecycles (`PREPARING` -> `READY` -> `SERVED`).
-  - Added dish customization modal for ingredient modifications (`No Onions`, `Extra Cheese`, `Make it Spicy`).
-  - Assembled `app.py` chaining UI, Speech Engine, FSM, and SQLite tools.
-* **Navigator Feedback (Carvajal):**
-  - Optimized chef spotlight container from 360px column to responsive 1.35fr layout (`aspect-ratio: 1535/1024`) ensuring all 7 chefs fit edge-to-edge without cropping.
-  - Audited API endpoints, confirming zero syntax errors across all modules.
-
-### Work Distribution Summary
-
-| Team Member | Primary Roles Held | Key Modules Authored | Contribution Share |
-| :--- | :--- | :--- | :---: |
-| **Christian Ezekiel L. Carvajal** | Systems Architect / Lead Driver (M1)<br>Navigator (M2) | `init_restaurant_db.sql`, `init_db.py`, `db_tools.py`, `speech_engine.py`, layout bounds | 50% |
-| **John Miko P. Sarsalijo** | Fullstack Lead / Lead Driver (M2)<br>Navigator (M1) | `fsm_controller.py`, `app.py`, `ui_dashboard/` (templates & static), KDS workflow | 50% |
-
----
-
-## 6. Live Defense Quick-Start & Operator Manual
-
-### Prerequisites
-1. Local Ollama installed and active: `ollama run qwen2.5:1.5b`
-2. Python 3.10+ with dependencies installed:
-   ```bash
-   pip install fastapi uvicorn edge-tts requests pydantic jinja2
-   ```
-
-### Execution Steps
-1. **Initialize Database**:
-   ```bash
-   python init_db.py --reset
-   ```
-2. **Launch Application**:
-   ```bash
-   python app.py --port 8000
-   ```
-3. **Access Tabletop Kiosk**:
-   Open browser at [http://localhost:8000](http://localhost:8000) or on local tablet.
-
-4. **Live Defense Test Verification**:
-   - *Test 1 (Out-of-Stock)*: In chat or voice, say: *"I would like to order the Crispy Buffalo Chicken Tenders"*. Verify agent informs that stock is 0 and suggests available alternatives.
-   - *Test 2 (Post-Confirmation Lock)*: Add a Perpetual Classic Burger, click Checkout or confirm via voice, then try saying: *"Cancel my order"* or *"Remove the burger"*. Verify system refuses modification because the order has already been finalized and routed to the kitchen.
+1. **Stress Test 1: Out-of-Stock Item Rejection**
+   - *Scenario*: Diner requests `Crispy Buffalo Chicken Tenders` (pre-seeded with `stock_qty = 0`).
+   - *System Behavior*: `db_tools.check_availability()` intercepts the request before insertion. The engine responds with a polite Filipino/Taglish apology, leaves the cart uncharged, and suggests in-stock alternatives (Grilled Chicken Pesto Sandwich or Bacon Mushroom Melt).
+2. **Stress Test 2: Post-Confirmation Modification Lock**
+   - *Scenario*: Diner attempts to cancel or add items after the order reaches `STATE_CONFIRMED`.
+   - *System Behavior*: FSM rejects tool execution. The agent informs the diner that the transaction has already been committed to `restaurant.db` and routed to the kitchen display.
