@@ -202,11 +202,35 @@ def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlit
         score = max(token_ratio, seq_ratio, typo_ratio)
 
         # High-confidence bonus for key dish identifiers
-        if ("perpetual" in cleaned or "perpetul" in cleaned) and ("burger" in cleaned or "classic" in cleaned) and it["name"] == "Perpetual Classic Burger":
+        if ("perpetual" in cleaned or "perpetul" in cleaned or "classic" in cleaned) and ("burger" in cleaned or "classic" in cleaned or "beef" in cleaned) and it["name"] == "Perpetual Classic Burger":
             score = 1.0
-        elif "calamansi" in cleaned and it["name"] == "Fresh Calamansi Iced Tea":
+        elif ("bacon" in cleaned or "melt" in cleaned or "mushroom melt" in cleaned) and it["name"] == "Bacon Mushroom Melt Burger":
             score = 1.0
-        elif "truffle" in cleaned and it["name"] == "Truffle Mushroom Pasta":
+        elif ("calamansi" in cleaned or "iced tea" in cleaned) and it["name"] == "Fresh Calamansi Iced Tea":
+            score = 1.0
+        elif ("truffle" in cleaned or "mushroom pasta" in cleaned) and it["name"] == "Truffle Mushroom Pasta":
+            score = 1.0
+        elif ("carbonara" in cleaned) and it["name"] == "Creamy Carbonara":
+            score = 1.0
+        elif ("bolognese" in cleaned or "spaghetti" in cleaned) and it["name"] == "Classic Spaghetti Bolognese":
+            score = 1.0
+        elif ("buffalo" in cleaned or "tenders" in cleaned) and it["name"] == "Crispy Buffalo Chicken Tenders":
+            score = 1.0
+        elif ("cheese fries" in cleaned or "loaded fries" in cleaned or "loaded" in cleaned) and it["name"] == "Loaded Cheese Fries":
+            score = 1.0
+        elif ("french fries" in cleaned or "golden fries" in cleaned or cleaned == "fries") and it["name"] == "Golden French Fries":
+            score = 1.0
+        elif ("macchiato" in cleaned or "caramel macchiato" in cleaned) and it["name"] == "Iced Caramel Macchiato":
+            score = 1.0
+        elif ("brewed coffee" in cleaned or "kape" in cleaned or "brewed" in cleaned) and it["name"] == "Classic Brewed Coffee":
+            score = 1.0
+        elif ("cheesecake" in cleaned or "new york cheesecake" in cleaned) and it["name"] == "Classic New York Cheesecake":
+            score = 1.0
+        elif ("lava cake" in cleaned or "chocolate cake" in cleaned) and it["name"] == "Molten Lava Chocolate Cake":
+            score = 1.0
+        elif ("champion combo" in cleaned or "burger combo" in cleaned) and it["name"] == "Perpetual Champion Combo":
+            score = 1.0
+        elif ("sweet treat" in cleaned or "pasta combo" in cleaned) and it["name"] == "Pasta & Sweet Treat Combo":
             score = 1.0
 
         if score > best_score:

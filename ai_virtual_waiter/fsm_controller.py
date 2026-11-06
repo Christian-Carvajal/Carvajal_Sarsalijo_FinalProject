@@ -201,28 +201,6 @@ BISTRO_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "set_dialogue_state",
-            "description": "Transition the conversational FSM state based on the customer's dialogue phase (e.g. STATE_MENU_BROWSING when asking about food, STATE_TAKING_ORDER when selecting dishes, STATE_REVIEW when asking for the bill, STATE_CONFIRMED on checkout).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_state": {
-                        "type": "string",
-                        "enum": ["STATE_GREETING", "STATE_MENU_BROWSING", "STATE_TAKING_ORDER", "STATE_REVIEW", "STATE_CONFIRMED"],
-                        "description": "The destination FSM state."
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Why this transition occurred based on customer input."
-                    }
-                },
-                "required": ["new_state"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "clear_cart",
             "description": "Delete all items and completely reset the customer's active order tab in the database.",
             "parameters": {
@@ -828,6 +806,8 @@ class BistroFSMAgent:
             "- When customer confirms, places, or checks out the order (e.g. 'confirm order', 'place order', 'bayaran na', 'paki-order na'): call `confirm_order_and_deduct_stock()`.\n"
             "- When customer asks about dietary allergens (e.g. 'does the burger have dairy?', 'may gluten ba?'): call `check_item_allergen`.\n"
             "- When customer asks about kitchen tickets, status, or business revenue: call `get_kitchen_tickets` or `get_analytics_summary`.\n"
+            "- NATURAL CONVERSATIONAL SPEECH: Always converse warmly, thoughtfully, and naturally as an attentive bistro waiter. When executing actions (adding dishes, removing dishes, checking bills, answering questions), NEVER give robotic one-word answers like 'Updated.' or raw status dumps. Acknowledge what was done in full, warm sentences and offer helpful suggestions (e.g. 'I have added 1x Perpetual Classic Burger to your tab! Would you like fries or a refreshing iced tea with that?').\n"
+            "- DIETARY & ALLERGEN CARE: When answering allergen or health queries (e.g. lactose intolerance, dairy, gluten), explain clearly which components contain the allergen and offer kitchen adjustments (e.g. removing cheese, dairy-free alternatives).\n"
             "- PRONOUN RESOLUTION: If the customer refers to 'that', 'it', 'the only item', or 'the 1 item in the cart', resolve it to the dish listed in the active cart above.\n"
             "- CREATOR IDENTITY: You were engineered and created by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo (3rd-year BSCS - Data Science, UPHSD). Always mention both by name when asked who created or developed you.\n"
             "- CURRENCY: All prices are strictly in Philippine Pesos (PHP, ₱, pesos). Never mention foreign currencies.\n"
@@ -1642,7 +1622,7 @@ class BistroFSMAgent:
                 resp_text = f"Here are some of our popular available dishes in the kitchen: {sample}. Would you like burgers, pastas, sides, or beverages?"
 
         # 3. Intent: View Bill / Cart Review
-        elif not is_remove_intent and re.search(r"\b(bill|cart|tab|total|magkano|bayarin|summary|review)\b", text_lower):
+        elif not is_remove_intent and not has_order_verb and not any(w in text_lower for w in ["add", "buy", "order", "pabili", "dagdag", "isama"]) and re.search(r"\b(bill|tab|total|magkano|bayarin|summary|review|view cart|show cart|tingnan ang cart)\b", text_lower):
             res = self.execute_tool("view_current_order", {})
             turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
             items = res.get("line_items", [])
@@ -1878,84 +1858,40 @@ class BistroFSMAgent:
                     }
                     self.messages.append(tool_msg)
 
-                if turn_tool_calls:
-                    synthesis_parts = []
-                    rendered_tools = set()
-                    for tc in turn_tool_calls:
-                        t_name = tc["tool"]
-                        t_res = tc["result"]
-                        if t_name in rendered_tools:
-                            continue
-                        rendered_tools.add(t_name)
-                        if t_name == "add_item_to_order" and t_res.get("status") == "success":
-                            it = t_res.get("added_item", {})
-                            synthesis_parts.append(
-                                f"Added {it.get('quantity', 1)}x {it.get('name', 'item')} to your tab. Subtotal: ₱{t_res.get('new_order_subtotal', 0.0):.2f}. Would you like anything else?"
-                            )
-                        elif t_name == "add_item_to_order" and t_res.get("status") == "out_of_stock":
-                            msg = t_res.get("message", "Item is out of stock.")
-                            sugg = t_res.get("suggestion", "")
-                            synthesis_parts.append(f"{msg} {sugg}".strip())
-                        elif t_name == "add_item_to_order" and t_res.get("status") in ["error", "stock_limit_reached"]:
-                            synthesis_parts.append(t_res.get("message", "Cannot modify order."))
-                        elif t_name == "remove_item_from_order" and t_res.get("status") == "success":
-                            rem = t_res.get("removed_item", "item")
-                            rem_count = t_res.get("remaining_items", 0)
-                            status_note = "Your cart is now empty." if rem_count == 0 else f"{rem_count} item(s) remain in your cart."
-                            synthesis_parts.append(f"Removed {rem} from your order tab. {status_note}")
-                        elif t_name == "remove_item_from_order" and t_res.get("status") == "empty_cart":
-                            synthesis_parts.append("Your cart is currently empty. There is nothing to remove.")
-                        elif t_name == "remove_item_from_order" and t_res.get("status") == "error":
-                            synthesis_parts.append(t_res.get("message", "Cannot modify order."))
-                        elif t_name == "confirm_order_and_deduct_stock" and t_res.get("status") == "success":
-                            synthesis_parts.append(
-                                f"Order confirmed! Receipt #{t_res.get('receipt_id')} sent to kitchen display for Table #{t_res.get('table_no')}. Subtotal: ₱{t_res.get('subtotal', 0.0):.2f}, Total: ₱{t_res.get('grand_total', 0.0):.2f}."
-                            )
-                        elif t_name == "view_current_order" and t_res.get("status") == "success":
-                            items = t_res.get("line_items", [])
-                            if items:
-                                items_desc = ", ".join([f"{it['quantity']}x {it['name']} (₱{it['line_total']:.2f})" for it in items])
-                                synthesis_parts.append(f"Current cart for Table #{t_res.get('table_no')}: {items_desc}. Total: ₱{t_res.get('grand_total', 0.0):.2f}.")
-                            else:
-                                synthesis_parts.append("Your order tab is currently empty.")
-                        elif t_name == "get_recommendations" and t_res.get("status") == "success":
-                            recs = t_res.get("bestsellers", []) or t_res.get("recommended_items", [])
-                            rec_str = ", ".join([f"{r['name']} (₱{r['price']:.2f})" for r in recs[:3]])
-                            pairings = t_res.get("pairing_suggestions", [])
-                            pair_str = f" Pairings: {'; '.join(pairings[:2])}." if pairings else ""
-                            synthesis_parts.append(f"Recommended crowd-favorites: {rec_str}.{pair_str} Which one would you like to try?")
-                        elif t_name == "check_item_allergen" and t_res.get("status") == "success":
-                            it_name = t_res.get("item_name")
-                            al_name = t_res.get("allergen")
-                            has_al = t_res.get("contains_allergen")
-                            if has_al:
-                                synthesis_parts.append(f"Yes, {it_name} contains {al_name} (Declared: {t_res.get('declared_allergens', 'None')}).")
-                            else:
-                                synthesis_parts.append(f"Good news! {it_name} is free of {al_name}.")
-                        elif t_name == "get_removed_items":
-                            rem_list = t_res.get("removed_items", [])
-                            if rem_list:
-                                latest = rem_list[0]
-                                synthesis_parts.append(f"The last item removed from your cart was {latest['quantity']}x {latest['item_name']} (₱{latest['unit_price']:.2f}).")
-                            else:
-                                synthesis_parts.append("No items have been removed from your cart during this session.")
-                        elif t_name == "get_last_order_item":
-                            last_i = t_res.get("last_item")
-                            if last_i:
-                                synthesis_parts.append(f"Your last added item was {last_i['quantity']}x {last_i['name']} (₱{last_i['unit_price']:.2f}).")
-                            else:
-                                synthesis_parts.append("You haven't added any items to your order tab yet.")
-                        else:
-                            synthesis_parts.append(t_res.get("message", "Updated."))
-                    final_content = " ".join(synthesis_parts)
+                # Tool executed and appended to self.messages.
+                # After executing tool calls for this turn, break so we can synthesize natural speech.
                 break
 
-            # Guarantee database tool execution if LLM responded only in free text
-            fallback_speech = self._ensure_critical_tool_execution(user_input, turn_tool_calls)
+            # If tools were executed, invoke Ollama to synthesize a natural conversational response
+            # using machine learning based on the tool outputs in self.messages
+            if turn_tool_calls and not final_content:
+                try:
+                    synthesis_payload = {
+                        "model": self.model,
+                        "messages": self.messages,
+                        "stream": False,
+                        "keep_alive": "24h",
+                        "options": {
+                            "temperature": 0.35,
+                            "num_ctx": 2048,
+                        }
+                    }
+                    synth_resp = self._call_ollama_chat(synthesis_payload, timeout=60)
+                    synth_msg = synth_resp.get("message", {})
+                    final_content = synth_msg.get("content", "").strip()
+                    s_thinking = synth_msg.get("thinking", "")
+                    if s_thinking:
+                        model_thinking += ("\n" + s_thinking if model_thinking else s_thinking)
+                except Exception:
+                    pass
 
             clean_text = re.sub(r"<think>.*?</think>", "", final_content, flags=re.DOTALL).strip()
-            if fallback_speech:
-                clean_text = fallback_speech
+
+            # Absolute fallback ONLY if the LLM produced zero text:
+            if not clean_text:
+                fallback_speech = self._ensure_critical_tool_execution(user_input, turn_tool_calls)
+                if fallback_speech:
+                    clean_text = fallback_speech
 
             if not clean_text and turn_tool_calls:
                 synthesis_parts = []
@@ -1976,8 +1912,25 @@ class BistroFSMAgent:
                             synthesis_parts.append(f"Current cart for Table #{t_res.get('table_no')}: {items_desc}. Total: ₱{t_res.get('grand_total'):.2f}.")
                         else:
                             synthesis_parts.append("Your order tab is currently empty.")
-                    else:
-                        synthesis_parts.append(t_res.get("message", "Updated."))
+                    elif t_name == "check_item_allergen":
+                        it_name = t_res.get("item_name", "the dish")
+                        al_name = t_res.get("allergen", "this allergen")
+                        has_al = t_res.get("contains_allergen")
+                        if has_al:
+                            synthesis_parts.append(f"Yes, {it_name} contains {al_name} (Declared allergens: {t_res.get('declared_allergens', 'None')}).")
+                        else:
+                            synthesis_parts.append(f"Good news! {it_name} does not contain {al_name}.")
+                    elif t_name == "add_item_to_order":
+                        if t_res.get("status") == "success":
+                            synthesis_parts.append(t_res.get("message", "Added item to your order tab."))
+                        elif t_res.get("status") == "out_of_stock":
+                            synthesis_parts.append(f"{t_res.get('message')} {t_res.get('suggestion', '')}".strip())
+                    elif t_name == "remove_item_from_order":
+                        synthesis_parts.append(t_res.get("message", "Removed item from your cart."))
+                    elif t_name == "update_item_quantity":
+                        synthesis_parts.append(t_res.get("message", "Updated item quantity."))
+                    elif t_res.get("message") and t_res["message"] != "Updated.":
+                        synthesis_parts.append(t_res["message"])
                 clean_text = " ".join(synthesis_parts)
 
             if not clean_text:
