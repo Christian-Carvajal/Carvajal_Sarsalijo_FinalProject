@@ -76,6 +76,8 @@ INSERT OR IGNORE INTO menu_items (name, category, price, stock_qty, allergens, d
 ('Truffle Mushroom Pasta', 'Pastas', 210.00, 14, 'Gluten, Dairy', 'Fettuccine tossed in a rich black truffle cream sauce with sautéed mushrooms.'),
 ('Classic Spaghetti Bolognese', 'Pastas', 175.00, 18, 'Gluten, Dairy, Beef', 'Slow-simmered beef bolognese sauce over al dente spaghetti with parmesan.'),
 ('Creamy Carbonara', 'Pastas', 190.00, 16, 'Gluten, Dairy, Pork, Egg', 'Traditional egg yolk cream sauce with crispy smoked bacon and cracked black pepper.'),
+('Pan-Seared Salmon', 'Pastas', 240.00, 2, 'Fish, Dairy', 'Fresh pan-seared Atlantic salmon fillet with garlic mashed potatoes (Strict stock: 2).'),
+('Crispy Slice Salmon', 'Pastas', 220.00, 0, 'Fish, Gluten', 'Out-of-stock panel defense item: crispy skin salmon with lemon dill butter (Stock: 0).'),
 
 -- Sides & Appetizers
 ('Golden French Fries', 'Sides', 75.00, 50, 'None', 'Crisp skin-on russet potatoes seasoned with fine sea salt.'),

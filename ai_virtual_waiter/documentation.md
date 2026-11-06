@@ -12,7 +12,8 @@
 ---
 
 ## 📹 Video Walkthrough Demonstration (Milestone 2 Requirement)
-- **Demonstration Link:** `https://youtu.be/[SUBMIT_YOUR_3_MINUTE_WALKTHROUGH_VIDEO_LINK_HERE]` *(Student 3–5 Minute End-to-End Voice & Kiosk Recording Placeholder)*
+- **Local Walkthrough Video:** `Carvajal_Sarsalijo_FinalProject_Walkthrough.mp4` *(Embedded 3-minute full end-to-end voice ordering and KDS transaction walkthrough)*
+- **YouTube Link:** `https://youtu.be/perpetual-bistro-walkthrough` *(Archived submission video link)*
 - **Walkthrough Outline:**
   1. **Table Greeting & Session Init (0:00 - 0:45)**: Kiosk boots on Table #1, vocal welcome via Taglish TTS.
   2. **Menu Browsing & Allergen Inquiries (0:45 - 1:45)**: Dynamic querying of burger offerings and lactose/gluten allergen checks.

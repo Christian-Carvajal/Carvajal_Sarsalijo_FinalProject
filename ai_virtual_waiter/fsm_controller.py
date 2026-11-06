@@ -273,6 +273,20 @@ DISH_CATALOG = [
         "aliases": ["creamy carbonara", "carbonara"],
     },
     {
+        "name": "Pan-Seared Salmon",
+        "category": "Pastas",
+        "price": 240.0,
+        "allergens": ["Fish", "Dairy"],
+        "aliases": ["pan-seared salmon", "pan seared salmon", "seared salmon", "salmon fillet"],
+    },
+    {
+        "name": "Crispy Slice Salmon",
+        "category": "Pastas",
+        "price": 220.0,
+        "allergens": ["Fish", "Gluten"],
+        "aliases": ["crispy slice salmon", "crispy salmon", "salmon"],
+    },
+    {
         "name": "Loaded Cheese Fries",
         "category": "Sides",
         "price": 110.0,
@@ -514,6 +528,9 @@ class BistroFSMAgent:
 
     def transition_state(self, new_state: str, reason: str = "") -> None:
         """Executes a formal FSM state transition and persists it in SQLite."""
+        if self.state == STATE_CONFIRMED and new_state != STATE_CONFIRMED:
+            # LOCKED: Post-confirmation state cannot be altered for this session
+            return
         old_state = self.state
         self.state = new_state
         db_tools.set_session_status(self.session_id, new_state, db_path=self.db_path)
@@ -559,6 +576,13 @@ class BistroFSMAgent:
             return db_tools.check_availability(item, qty, db_path=self.db_path)
 
         elif tool_name == "add_item_to_order":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "error": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket.",
+                    "message": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket."
+                }
             item = args.get("item_name", "")
             qty = int(args.get("qty", 1))
             instructions = args.get("instructions", "")
@@ -568,24 +592,48 @@ class BistroFSMAgent:
             return res
 
         elif tool_name == "remove_item_from_order":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "error": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket.",
+                    "message": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket."
+                }
             item = args.get("item_name", "")
             res = db_tools.remove_item_from_order(self.session_id, item, db_path=self.db_path)
-            self.transition_state(STATE_TAKING_ORDER, reason=f"Item removed: {item}")
+            if res.get("status") == "success":
+                self.transition_state(STATE_TAKING_ORDER, reason=f"Item removed: {item}")
             return res
 
         elif tool_name == "update_item_quantity":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "error": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket.",
+                    "message": "Order is already CONFIRMED and locked. Cannot modify items on a finalized ticket."
+                }
             item = args.get("item_name", "")
             qty = int(args.get("qty", 1))
             res = db_tools.update_item_quantity(self.session_id, item, qty, db_path=self.db_path)
-            self.transition_state(STATE_TAKING_ORDER, reason=f"Quantity updated: {item}")
+            if res.get("status") == "success":
+                self.transition_state(STATE_TAKING_ORDER, reason=f"Quantity updated: {item}")
             return res
 
         elif tool_name == "view_current_order":
             res = db_tools.view_current_order(self.session_id, db_path=self.db_path)
-            self.transition_state(STATE_REVIEW, reason="Customer reviewing bill tab")
+            if self.state != STATE_CONFIRMED:
+                self.transition_state(STATE_REVIEW, reason="Customer reviewing bill tab")
             return res
 
         elif tool_name == "confirm_order_and_deduct_stock":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "already_confirmed",
+                    "success": False,
+                    "error": "This order tab has already been confirmed and paid. Cannot re-confirm.",
+                    "message": "This order tab has already been confirmed and paid. Cannot re-confirm."
+                }
             db_tools.create_or_get_session(self.table_no, self.session_id, db_path=self.db_path)
             res = db_tools.confirm_order_and_deduct_stock(self.session_id, db_path=self.db_path)
             if res.get("status") == "success":
@@ -738,6 +786,34 @@ class BistroFSMAgent:
         has_browse_query = bool(re.search(r"\b(what|anong|ano|meron|show|list|menu|options|choices|categories|tignan|tingnan|available|mayroon)\b", text_lower))
         has_order_verb = bool(re.search(r"\b(order|add|buy|get|take|pabili|hingi|gusto|pakidagdag|isama)\b", text_lower))
 
+        # Post-Confirmation State Lock Guard: Block any modification/cancellation once confirmed
+        if self.state == STATE_CONFIRMED:
+            if found_dishes or has_confirm_intent or any(w in text_lower for w in ["cancel", "kansela", "bawiin", "dagdag", "palitan", "alisin", "tanggalin", "remove", "change", "modify", "edit"]):
+                if is_filipino:
+                    resp_text = (
+                        f"Paumanhin po! Ang inyong order para sa Table #{self.table_no} ay kumpirmado na at kasalukuyan nang inihahanda ng ating chef sa kusina. "
+                        "Hindi na po ito maaaring baguhin o kanselahin. Maaari po kayong magbukas ng bagong order tab kung nais ninyong magdagdag ng ibang putahe!"
+                    )
+                else:
+                    resp_text = (
+                        f"I apologize, but your order for Table #{self.table_no} has already been confirmed and sent to the kitchen for preparation. "
+                        "Orders cannot be modified or canceled once confirmed. Feel free to open a new order session if you would like to order additional items!"
+                    )
+                cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                turn_data = {
+                    "turn_index": len(self.messages),
+                    "user_input": user_input,
+                    "assistant_response": resp_text,
+                    "current_state": STATE_CONFIRMED,
+                    "fsm_state": STATE_CONFIRMED,
+                    "tool_calls": [],
+                    "engine": "fallback_deterministic",
+                    "reason": "post_confirmation_state_lock",
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+
         # 0. Intent: Greeting (if customer greets without dishes or explicit ordering verbs)
         if has_greeting and not has_order_verb and not (found_dishes and not has_browse_query):
             if is_filipino:
@@ -824,30 +900,37 @@ class BistroFSMAgent:
         elif found_dishes and (has_order_verb or not has_browse_query):
             added_msgs = []
             for dish, qty, instructions in found_dishes:
-                if dish["name"] == "Crispy Buffalo Chicken Tenders":
-                    avail = self.execute_tool("check_availability", {"item_name": dish["name"], "qty": qty})
-                    turn_tool_calls.append({"tool": "check_availability", "arguments": {"item_name": dish["name"], "qty": qty}, "result": avail})
+                res = self.execute_tool("add_item_to_order", {
+                    "item_name": dish["name"],
+                    "qty": qty,
+                    "instructions": instructions
+                })
+                turn_tool_calls.append({
+                    "tool": "add_item_to_order",
+                    "arguments": {"item_name": dish["name"], "qty": qty, "instructions": instructions},
+                    "result": res
+                })
+                if res.get("status") == "out_of_stock":
+                    alts = res.get("recommended_alternatives", [])
+                    alt_str = ", ".join([f"{a['name']} (₱{a['price']:.2f})" for a in alts]) if alts else "other items from our menu"
                     if is_filipino:
                         added_msgs.append(
-                            f"Paumanhin po! Ang Crispy Buffalo Chicken Tenders ay kasalukuyang out-of-stock sa aming kusina (0 natitira). "
-                            f"Nais niyo po bang subukan ang Grilled Chicken Pesto Sandwich (₱165.00) o Bacon Mushroom Melt Burger (₱185.00) bilang alternatibo?"
+                            f"Paumanhin po! Ang {dish['name']} ay kasalukuyang out-of-stock sa aming kusina ({res.get('stock_available', 0)} available). "
+                            f"Nais niyo po bang subukan ang aming {alt_str} bilang alternatibo?"
                         )
                     else:
                         added_msgs.append(
-                            f"I apologize, but our Crispy Buffalo Chicken Tenders are currently out of stock (0 available). "
-                            f"Would you like to try our Grilled Chicken Pesto Sandwich (₱165.00) or Bacon Mushroom Melt Burger (₱185.00) instead?"
+                            f"I apologize, but {dish['name']} is currently out of stock ({res.get('stock_available', 0)} available). "
+                            f"Would you like to try our {alt_str} instead?"
                         )
+                elif res.get("status") == "stock_limit_reached":
+                    if is_filipino:
+                        added_msgs.append(f"Paumanhin po! {res.get('message')}")
+                    else:
+                        added_msgs.append(f"I apologize! {res.get('message')}")
+                elif res.get("status") == "error":
+                    added_msgs.append(res.get("message", "Cannot modify order."))
                 else:
-                    res = self.execute_tool("add_item_to_order", {
-                        "item_name": dish["name"],
-                        "qty": qty,
-                        "instructions": instructions
-                    })
-                    turn_tool_calls.append({
-                        "tool": "add_item_to_order",
-                        "arguments": {"item_name": dish["name"], "qty": qty, "instructions": instructions},
-                        "result": res
-                    })
                     inst_note = f" ({instructions})" if instructions else ""
                     if is_filipino:
                         added_msgs.append(f"Nai-dagdag ko na po ang {qty}x {dish['name']}{inst_note} sa inyong order tab.")
