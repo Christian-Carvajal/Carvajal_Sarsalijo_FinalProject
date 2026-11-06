@@ -4500,7 +4500,9 @@
                     } else if (e.error === 'audio-capture') {
                         showToast("No microphone detected on this device.", "⚠️");
                     } else if (e.error === 'network') {
-                        showToast("Speech service network timeout. Please check your internet connection.", "⚠️");
+                        showToast("Microphone network service unavailable (Brave/Offline mode). Use the voice demo chips above or type directly below!", "🎙️");
+                    } else {
+                        showToast("Voice input status: " + e.error, "⚠️");
                     }
                 };
 

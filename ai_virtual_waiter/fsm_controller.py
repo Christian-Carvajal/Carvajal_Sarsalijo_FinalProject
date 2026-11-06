@@ -21,11 +21,11 @@ def select_best_model() -> str:
         return os.environ["OLLAMA_MODEL"]
     try:
         req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             installed = [m.get("name", "") for m in data.get("models", [])]
-            # Prioritize qwen2.5:1.5b to prevent cudaMalloc OOM on 4GB/6GB laptop GPUs
-            for cand in ["qwen2.5:1.5b", "qwen3.5:4b", "jarvis-trained-model:latest"]:
+            # Prioritize qwen2.5:7b (recommended by rubric for robust tool calling & natural Taglish)
+            for cand in ["qwen2.5:7b", "qwen2.5:3b", "qwen2.5:1.5b", "qwen3.5:4b"]:
                 for m in installed:
                     if cand in m:
                         return m
@@ -33,7 +33,7 @@ def select_best_model() -> str:
                 return installed[0]
     except Exception:
         pass
-    return "qwen2.5:1.5b"
+    return "qwen2.5:7b"
 
 DEFAULT_MODEL = select_best_model()
 
@@ -473,15 +473,15 @@ class BistroFSMAgent:
             "University of Perpetual Help System DALTA.\n"
             f"You are actively serving Table #{self.table_no} (Session ID: {self.session_id}).\n\n"
             "NATURAL CONVERSATION & INTELLIGENCE GUIDELINES:\n"
-            "1. CONVERSE DYNAMICALLY LIKE CHATGPT: Answer questions spontaneously on the spot. If a customer chats, "
-            "asks what you personally recommend, asks for pairing ideas, jokes about food, or asks general dining questions, "
-            "respond warmly, naturally, and intelligently in your own words. Never sound robotic or scripted.\n"
+            "1. CONVERSE DYNAMICALLY LIKE CHATGPT: Answer questions spontaneously on the spot in English or natural Taglish. "
+            "If a customer chats, asks what you sell ('ano pang iba niyong tinda?', 'what do you offer?'), asks what you personally recommend, "
+            "asks for pairing ideas, or asks general dining questions, respond warmly, naturally, and intelligently in your own words. Never sound robotic or scripted.\n"
             "2. CURRENCY RULE: All prices in Perpetual Bistro are strictly in Philippine Pesos (PHP, ₱). "
             "Always state prices simply as 'pesos' or '₱' (e.g., '150 pesos' or '₱150.00'). "
             "NEVER say 'Cuban pesos', 'Mexican pesos', or any foreign currency denomination.\n"
             "3. STATE MACHINE CONTEXT:\n"
             f"   - Current FSM State: {self.state}.\n"
-            "   - When customer browses menu or asks about dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING).\n"
+            "   - When customer browses menu or asks what you sell, dishes, allergens, or ingredients: call `check_item_allergen` or `get_menu_by_category` (STATE_MENU_BROWSING) to inspect live items.\n"
             "   - CRITICAL TOOL POLICY: NEVER invoke `add_item_to_order` if the customer is merely asking questions about allergens, lactose, gluten, dietary ingredients, availability, or prices! Only answer their inquiry. Invoke `add_item_to_order` ONLY when the customer explicitly asks to order, buy, or add the dish to their cart/tab.\n"
             "   - When customer wants to order: invoke `add_item_to_order` with their requested quantity and customizations (STATE_TAKING_ORDER).\n"
             "   - When customer asks about their bill, current tab, or summary: call `view_current_order` to present their bill (STATE_REVIEW).\n"
@@ -589,8 +589,10 @@ class BistroFSMAgent:
         else:
             return {"status": "error", "message": f"Unknown tool name: {tool_name}"}
 
-    def _call_ollama_chat(self, payload: Dict[str, Any], timeout: int = 4) -> Dict[str, Any]:
+    def _call_ollama_chat(self, payload: Dict[str, Any], timeout: int = 35) -> Dict[str, Any]:
         """Sends HTTP request to local Ollama /api/chat endpoint with memory-safe fallback."""
+        if "keep_alive" not in payload:
+            payload["keep_alive"] = "24h"
         data_bytes = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             OLLAMA_API_URL,
@@ -692,6 +694,19 @@ class BistroFSMAgent:
             if "view_current_order" not in tools_executed and "confirm_order_and_deduct_stock" not in tools_executed:
                 res = self.execute_tool("view_current_order", {})
                 turn_tool_calls.append({"tool": "view_current_order", "arguments": {}, "result": res})
+
+        # 4. Menu & Category Browsing Guard (if customer asks what else is sold / available)
+        browse_menu_keywords = [
+            "ano pang", "ano pa", "ibang tinda", "iba ninyong tinda", "iba niyong tinda",
+            "anong tinda", "anong meron", "ano ang menu", "what else do you sell", "what other items",
+            "what do you sell", "what's on the menu", "menu options", "food choices"
+        ]
+        if any(w in text_lower for w in browse_menu_keywords) and not tools_executed:
+            m_res = self.execute_tool("get_menu_by_category", {"category": "all"})
+            turn_tool_calls.append({"tool": "get_menu_by_category", "arguments": {"category": "all"}, "result": m_res})
+            tools_executed.add("get_menu_by_category")
+            if self.state != STATE_CONFIRMED:
+                self.transition_state(STATE_MENU_BROWSING, reason="Customer menu inquiry")
 
         return " ".join(extra_messages)
 
@@ -914,7 +929,7 @@ class BistroFSMAgent:
                 resp_text = "Your cart is currently empty." if not is_filipino else "Wala pa pong laman ang inyong cart."
 
         # 4. Intent: Category / Menu Inquiry
-        elif any(w in text_lower for w in ["burger", "burgers", "pasta", "pastas", "side", "sides", "drink", "drinks", "beverage", "dessert", "desserts", "combo", "combos", "value meal", "menu"]):
+        elif any(w in text_lower for w in ["burger", "burgers", "pasta", "pastas", "side", "sides", "drink", "drinks", "beverage", "dessert", "desserts", "combo", "combos", "value meal", "menu", "tinda", "sell", "offer", "other items", "pagkain", "ibang tinda", "ano pa", "ano pang"]):
             cat = "all"
             for c in ["Combos", "Burgers", "Pastas", "Sides", "Beverages", "Desserts"]:
                 if c.lower() in text_lower or (c == "Combos" and "value meal" in text_lower):
@@ -1009,13 +1024,14 @@ class BistroFSMAgent:
                     "messages": self.messages,
                     "tools": BISTRO_TOOLS,
                     "stream": False,
+                    "keep_alive": "24h",
                     "options": {
                         "temperature": 0.2,
                         "num_ctx": 2048,
                     }
                 }
 
-                resp = self._call_ollama_chat(payload, timeout=15)
+                resp = self._call_ollama_chat(payload, timeout=35)
                 assistant_msg = resp.get("message", {})
                 raw_content = assistant_msg.get("content", "")
                 thinking = assistant_msg.get("thinking", "")
@@ -1112,6 +1128,7 @@ class BistroFSMAgent:
                 "assistant_response": clean_text,
                 "thinking": model_thinking.strip(),
                 "tool_calls": turn_tool_calls,
+                "engine": "ollama",
                 "cart": cart_state,
             }
             self.audit_log.append({"type": "dialogue_turn", "data": turn_data})

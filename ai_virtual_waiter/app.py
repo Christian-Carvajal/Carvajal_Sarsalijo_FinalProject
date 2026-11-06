@@ -49,6 +49,26 @@ db_tools.init_db()
 CURRENT_TABLE = 1
 active_agent = BistroFSMAgent(table_no=CURRENT_TABLE, model=DEFAULT_MODEL)
 
+def _prewarm_ollama_background():
+    import threading
+    import urllib.request
+    def _worker():
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:11434/api/chat",
+                data=json.dumps({"model": DEFAULT_MODEL, "messages": [{"role": "user", "content": "hello"}], "stream": False, "keep_alive": "24h"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                pass
+            print(f"[Ollama Pre-Warm] Model '{DEFAULT_MODEL}' pre-warmed & locked in VRAM (24h keep_alive).")
+        except Exception as e:
+            print(f"[Ollama Pre-Warm] Notice: {e}")
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+_prewarm_ollama_background()
+
 # Resolve UI Assets Path (prioritize ui_dashboard/ according to Lesson 7 file spec)
 UI_DASHBOARD_DIR = os.path.join(BASE_DIR, "ui_dashboard")
 STATIC_DIR = os.path.join(UI_DASHBOARD_DIR, "static") if os.path.isdir(os.path.join(UI_DASHBOARD_DIR, "static")) else os.path.join(BASE_DIR, "static")
