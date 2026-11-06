@@ -689,6 +689,8 @@ class BistroFSMAgent:
         has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
         has_question_words = bool(re.search(r"\b(does|is|are|can|what|anong|ano|meron|mayroon|how much|magkano|ingredients|contain)\b", text_lower))
         has_explicit_order_verb = bool(re.search(r"\b(order|add|pabili|buy|get|take|pakidagdag|isama|paki-order|i-order|dagdag|bilhin)\b", text_lower))
+        has_remove_verb = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal)\b", text_lower))
+        has_update_verb = bool(re.search(r"\b(change|update|gawing|palitan|make\s+it|set\s+to|increase|decrease)\b", text_lower))
 
         # 1. Allergen Tool Safety Guard: If user asked about allergens and tool wasn't executed:
         if has_allergen_words and "check_item_allergen" not in tools_executed:
@@ -703,13 +705,33 @@ class BistroFSMAgent:
             turn_tool_calls.append({"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": a_res})
             tools_executed.add("check_item_allergen")
 
-        # 2. Add Item(s) to Order ONLY IF NOT asking an allergen query AND (explicit order verb OR not an informational question)
-        if not has_allergen_words and (has_explicit_order_verb or not has_question_words):
+        # 2. Remove Item Safety Guard: If user requested removal and tool wasn't executed:
+        if has_remove_verb and "remove_item_from_order" not in tools_executed:
+            found_dishes_r = find_dishes_in_text(user_input)
+            for dish, qty, instructions in found_dishes_r:
+                r_res = self.execute_tool("remove_item_from_order", {"item_name": dish["name"]})
+                turn_tool_calls.append({"tool": "remove_item_from_order", "arguments": {"item_name": dish["name"]}, "result": r_res})
+                tools_executed.add("remove_item_from_order")
+                if r_res.get("status") == "success":
+                    extra_messages.append(r_res.get("message", f"Removed {dish['name']} from tab."))
+
+        # 3. Update Item Quantity Safety Guard:
+        if has_update_verb and not has_remove_verb and "update_item_quantity" not in tools_executed:
+            found_dishes_u = find_dishes_in_text(user_input)
+            for dish, qty, instructions in found_dishes_u:
+                u_res = self.execute_tool("update_item_quantity", {"item_name": dish["name"], "qty": qty})
+                turn_tool_calls.append({"tool": "update_item_quantity", "arguments": {"item_name": dish["name"], "qty": qty}, "result": u_res})
+                tools_executed.add("update_item_quantity")
+                if u_res.get("status") == "success":
+                    extra_messages.append(u_res.get("message", f"Updated {dish['name']} to {qty}."))
+
+        # 4. Add Item(s) to Order ONLY IF NOT allergen query AND NOT removing AND NOT updating:
+        if not has_allergen_words and not has_remove_verb and not has_update_verb and (has_explicit_order_verb or not has_question_words):
             found_dishes = find_dishes_in_text(user_input)
             if found_dishes:
                 added_dish_names = {tc.get("arguments", {}).get("item_name") for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
                 for dish, qty, instructions in found_dishes:
-                    if dish["name"] == "Crispy Buffalo Chicken Tenders":
+                    if dish["name"] in ["Crispy Buffalo Chicken Tenders", "Crispy Slice Salmon"]:
                         continue
                     if dish["name"] not in added_dish_names:
                         res = self.execute_tool("add_item_to_order", {
