@@ -1024,11 +1024,11 @@ class BistroFSMAgent:
                 if u_res.get("status") == "success":
                     extra_messages.append(u_res.get("message", f"Updated {dish['name']} to {qty}."))
 
-        # 4. Add Item(s) to Order ONLY IF NOT allergen query AND NOT removing AND NOT updating:
-        if not has_allergen_words and not is_remove_intent and not has_update_verb and (has_explicit_order_verb or not has_question_words):
+        # 4. Add Item(s) to Order ONLY IF NOT allergen query AND NOT removing AND NOT updating AND NOT already added:
+        if "add_item_to_order" not in tools_executed and not has_allergen_words and not is_remove_intent and not has_update_verb and (has_explicit_order_verb or not has_question_words):
             found_dishes = find_dishes_in_text(user_input)
             if found_dishes:
-                added_dish_names = {tc.get("arguments", {}).get("item_name") for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
+                added_dish_names = {(tc.get("arguments", {}).get("item_name") or tc.get("arguments", {}).get("dish_name")) for tc in turn_tool_calls if tc["tool"] == "add_item_to_order"}
                 for dish, qty, instructions in found_dishes:
                     if dish["name"] in ["Crispy Buffalo Chicken Tenders", "Crispy Slice Salmon"]:
                         continue
@@ -1592,13 +1592,387 @@ class BistroFSMAgent:
         self.messages.append({"role": "user", "content": user_input})
         if user_input.strip() == "Hello BistroBot":
             return self._fallback_dialogue_turn(user_input)
+
+        text_lower = user_input.lower().strip()
+
+        # 1. Post-Confirmation State Lock Guard (ONLY when customer attempts to modify/add/cancel order)
+        if self.state == STATE_CONFIRMED:
+            is_mod_attempt = bool(re.search(
+                r"\b(cancel|remove|bawas|alisin|tanggalin|change|palitan|modify|update|paki-cancel|i-cancel|dagdag|pakidagdag|another|isa\s+pa|additional|padagdag|order\s+another|order\s+more|add\s+order)\b",
+                text_lower
+            ))
+            is_inquiry = bool(re.search(r"\b(sales|revenue|analytics|total\s+orders|summary|who|sino|restroom|cr|menu|created)\b", text_lower))
+            if is_mod_attempt and not is_inquiry:
+                lock_resp = (
+                    "Your order has already been finalized and sent to the kitchen display! "
+                    "For any modifications or cancellations at Table #1, please coordinate directly with our floor service staff."
+                )
+                cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                turn_data = {
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "fsm_state": STATE_CONFIRMED,
+                    "user_input": user_input,
+                    "assistant_response": lock_resp,
+                    "thinking": "[Order Confirmed State Lock Active]",
+                    "tool_calls": [],
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+
+        # 2. Creator Attribution Guard
+        creator_keywords = [
+            "sino gumawa", "who made you", "who created you", "who programmed you",
+            "who developed you", "sino lumikha", "sino ang developer", "who are your creators", "sino mga gumawa"
+        ]
+        if any(w in text_lower for w in creator_keywords):
+            creator_resp = (
+                "I was created and engineered by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo, "
+                "3rd-year BS Computer Science (Data Science) students at the University of Perpetual Help System DALTA (UPHSD), "
+                "for our AI Finals Project (Perpetual Bistro)!"
+            )
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": creator_resp,
+                "thinking": "[Creator Attribution Guard Active]",
+                "tool_calls": [],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 3. Removed Items SQL Audit Trail Inquiry Guard
+        removed_inquiry_words = [
+            "removed item", "item was removed", "tinanggal", "inalis",
+            "what did i remove", "what was removed", "anong tinanggal", "anong inalis", "items removed"
+        ]
+        if any(w in text_lower for w in removed_inquiry_words):
+            r_res = self.execute_tool("get_removed_items", {})
+            r_items = r_res.get("removed_items", [])
+            if r_items:
+                r_resp = f"The most recent item removed from your cart was {r_items[0]['quantity']}x {r_items[0]['item_name']} (₱{r_items[0]['unit_price']:.2f})."
+            else:
+                r_resp = "No items have been removed from your cart in this session."
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": r_resp,
+                "thinking": "[Removed Item SQL Audit Trail Ingestion]",
+                "tool_calls": [{"tool": "get_removed_items", "arguments": {}, "result": r_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 4. Last Added Item SQL Inquiry Guard
+        last_item_words = ["last order", "last item", "huling order", "huling item", "last added", "huling dinagdag", "what was my last"]
+        if any(w in text_lower for w in last_item_words) and not any(w in text_lower for w in ["remove", "cancel", "alisin", "bawas", "tanggal"]):
+            l_res = self.execute_tool("get_last_order_item", {})
+            l_item = l_res.get("last_item")
+            if l_item:
+                l_resp = f"Your last added item was {l_item['quantity']}x {l_item['name']} (₱{l_item['unit_price']:.2f})."
+            else:
+                l_resp = "Your order tab is currently empty."
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": l_resp,
+                "thinking": "[Last Order Item SQL Ingestion]",
+                "tool_calls": [{"tool": "get_last_order_item", "arguments": {}, "result": l_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 5. Out-of-Stock / Unavailable Items Guard
+        unavail_words = ["out of stock", "unavailable", "walang stock", "ubos na", "hindi available", "anong ubos"]
+        if any(w in text_lower for w in unavail_words):
+            u_res = self.execute_tool("get_unavailable_items", {})
+            un = u_res.get("unavailable_items", [])
+            if un:
+                u_resp = f"Items currently out of stock in our kitchen: {', '.join([u['name'] for u in un])}."
+            else:
+                u_resp = "All menu items are currently in stock and ready to order!"
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": u_resp,
+                "thinking": "[Kitchen Stock Real-Time Query]",
+                "tool_calls": [{"tool": "get_unavailable_items", "arguments": {}, "result": u_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 6. Available Items Guard
+        avail_words = ["available items", "anong available", "what is available", "in stock", "mga available", "mga pwedeng orderin"]
+        if any(w in text_lower for w in avail_words) and not any(w in text_lower for w in ["unavail", "out of stock", "ubos"]):
+            av_res = self.execute_tool("get_available_items", {})
+            av = av_res.get("available_items", [])
+            avail_desc = ", ".join([f"{a['name']} (₱{a['price']:.2f})" for a in av[:5]])
+            av_resp = f"Dishes currently available in our kitchen: {avail_desc} and more."
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": av_resp,
+                "thinking": "[Live Available Inventory Query]",
+                "tool_calls": [{"tool": "get_available_items", "arguments": {}, "result": av_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 7. Recommendations / Chef Pairing Suggestions Guard
+        rec_words = ["can't pick", "cannot pick", "recommend", "recommendation", "suggest", "suggestion", "rekomenda", "ano marerecommend", "anong masarap", "di makapili", "hindi makapili"]
+        if any(w in text_lower for w in rec_words):
+            rec_res = self.execute_tool("get_recommendations", {})
+            pairs = rec_res.get("pairing_suggestions", [])
+            p_str = f" Chef pairings: {'; '.join(pairs[:2])}." if pairs else ""
+            rec_resp = f"Recommended crowd-favorites: Perpetual Classic Burger (₱150.00), Truffle Mushroom Pasta (₱210.00), Loaded Cheese Fries (₱110.00).{p_str}"
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": rec_resp,
+                "thinking": "[Chef Pairing Engine]",
+                "tool_calls": [{"tool": "get_recommendations", "arguments": {}, "result": rec_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 8. Executive Business Analytics Guard
+        analytics_words = ["analytics", "total sales", "total revenue", "kita ngayong araw", "business summary", "executive summary", "sales report"]
+        if any(w in text_lower for w in analytics_words):
+            an_res = self.execute_tool("get_analytics_summary", {})
+            an_resp = (
+                f"📊 Bistro Business Analytics Summary:\n"
+                f"• Total Revenue: ₱{an_res.get('total_revenue', 0.0):.2f}\n"
+                f"• Total Orders: {an_res.get('total_orders', 0)}\n"
+                f"• Low Stock Items Alert: {an_res.get('low_stock_count', 0)} item(s) below threshold"
+            )
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": an_resp,
+                "thinking": "[Executive Analytics Query]",
+                "tool_calls": [{"tool": "get_analytics_summary", "arguments": {}, "result": an_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 9. Contextual Remove / Cancel / Delete Item Guard (With Single-Item & Pronoun Resolution)
+        is_remove_mention = bool(re.search(
+            r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal|clear|only\s+1\s+item|only\s+item|the\s+only|remove\s+that|remove\s+it|cancel\s+that|delete\s+that)\b",
+            text_lower
+        ))
+        if is_remove_mention:
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            cart_items = cart_state.get("line_items", [])
+
+            if not cart_items:
+                r_resp = "Your order tab is currently empty, so there are no items to remove."
+                turn_data = {
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "fsm_state": self.state,
+                    "user_input": user_input,
+                    "assistant_response": r_resp,
+                    "thinking": "[Empty Cart Remove Safety Guard]",
+                    "tool_calls": [],
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+
+            if any(w in text_lower for w in ["all", "everything", "lahat", "clear cart", "empty cart", "clear all"]):
+                c_res = self.execute_tool("clear_cart", {})
+                cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                turn_data = {
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "fsm_state": self.state,
+                    "user_input": user_input,
+                    "assistant_response": "I have cleared all items from your order tab. Your cart is now empty. What would you like to order instead?",
+                    "thinking": "[Clear Cart Execution]",
+                    "tool_calls": [{"tool": "clear_cart", "arguments": {}, "result": c_res}],
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+
+            target_dish = None
+            found_dishes = find_dishes_in_text(user_input)
+            if found_dishes:
+                target_dish = found_dishes[0][0]["name"]
+            else:
+                for it in cart_items:
+                    it_words = [w for w in it["name"].lower().split() if len(w) > 3]
+                    if any(w in text_lower for w in it_words):
+                        target_dish = it["name"]
+                        break
+
+            if not target_dish:
+                if len(cart_items) == 1:
+                    target_dish = cart_items[0]["name"]
+                elif any(w in text_lower for w in ["last", "huli", "recent"]):
+                    last_obj = db_tools.get_last_order_item(self.session_id, db_path=self.db_path).get("last_item")
+                    if last_obj:
+                        target_dish = last_obj["name"]
+
+            if target_dish:
+                r_res = self.execute_tool("remove_item_from_order", {"item_name": target_dish})
+                cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                remaining = len(cart_state.get("line_items", []))
+                if remaining == 0:
+                    r_resp = f"I have removed {target_dish} from your order tab. Your cart is now empty. Would you like to order anything else?"
+                else:
+                    r_resp = f"I have removed {target_dish} from your order tab. Grand Total is now ₱{cart_state.get('grand_total', 0.0):.2f}. Would you like to add anything else?"
+
+                turn_data = {
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "fsm_state": self.state,
+                    "user_input": user_input,
+                    "assistant_response": r_resp,
+                    "thinking": f"[Contextual Dish Removal: {target_dish}]",
+                    "tool_calls": [{"tool": "remove_item_from_order", "arguments": {"item_name": target_dish}, "result": r_res}],
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+            else:
+                it_list = ", ".join([f"{it['quantity']}x {it['name']}" for it in cart_items])
+                turn_data = {
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "fsm_state": self.state,
+                    "user_input": user_input,
+                    "assistant_response": f"You currently have {it_list} in your cart. Which specific item would you like me to remove?",
+                    "thinking": "[Disambiguation Prompt for Removal]",
+                    "tool_calls": [],
+                    "cart": cart_state,
+                }
+                self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+                return turn_data
+
+        # 10. Order Confirmation Guard
+        confirm_words = ["confirm", "place my order", "place order", "place the order", "place it", "place this", "finalize", "checkout", "bayaran", "i-confirm", "complete order", "order na po"]
+        if any(w in text_lower for w in confirm_words) and not any(w in text_lower for w in ["don't", "do not", "wag", "huwag"]):
+            c_res = self.execute_tool("confirm_order_and_deduct_stock", {})
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            if c_res.get("status") == "success":
+                c_resp = (
+                    f"🎉 Order Confirmed! (Receipt #{c_res.get('receipt_id')})\n"
+                    f"Your order for Table #{c_res.get('table_no')} has been sent to the kitchen display!\n"
+                    f"Subtotal: ₱{c_res.get('subtotal', 0.0):.2f} | Grand Total: ₱{c_res.get('grand_total', 0.0):.2f}\n"
+                    f"Thank you for dining with Perpetual Bistro! Your food will be served shortly."
+                )
+            else:
+                c_resp = c_res.get("message", "Your order tab is currently empty. Please select items from our menu first.")
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": c_resp,
+                "thinking": "[Order Confirmation & Inventory Deduction]",
+                "tool_calls": [{"tool": "confirm_order_and_deduct_stock", "arguments": {}, "result": c_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 11. View Bill / Cart Tab Guard
+        bill_words = ["view my bill", "view bill", "view cart", "check cart", "tingnan ang cart", "tingnan ang bill", "magkano bill", "bill summary", "tab summary", "current tab", "current order", "ano order ko", "ano nasa cart"]
+        if any(w in text_lower for w in bill_words) and not is_remove_mention:
+            v_res = self.execute_tool("view_current_order", {})
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            line_items = v_res.get("line_items", [])
+            if line_items:
+                items_desc = "\n".join([f"- {it['quantity']}x {it['name']} (₱{it['line_total']:.2f})" for it in line_items])
+                v_resp = (
+                    f"Here is your current order for Table #{v_res.get('table_no')}:\n{items_desc}\n\n"
+                    f"Subtotal: ₱{v_res.get('subtotal'):.2f} (12% VAT included: ₱{v_res.get('vat_12_pct_breakdown'):.2f})\n"
+                    f"Grand Total: ₱{v_res.get('grand_total'):.2f}\n\nWould you like to confirm this order or make any changes?"
+                )
+            else:
+                v_resp = "Your order tab is currently empty. Would you like to view our menu?"
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": v_resp,
+                "thinking": "[Single-Pass Bill Query]",
+                "tool_calls": [{"tool": "view_current_order", "arguments": {}, "result": v_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # 12. Allergen Query Guard
+        has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
+        has_question_words = bool(re.search(r"\b(does|is|are|can|what|anong|ano|meron|mayroon|how much|magkano|ingredients|contain)\b", text_lower))
+        if has_allergen_words and has_question_words and not any(w in text_lower for w in ["order", "add", "bilhin", "pabili"]):
+            found_dishes_a = find_dishes_in_text(user_input)
+            target_dish = found_dishes_a[0][0]["name"] if found_dishes_a else "Perpetual Classic Burger"
+            target_allergen = "Dairy"
+            for a in ["Gluten", "Nuts", "Egg", "Pork", "Shellfish", "Dairy"]:
+                if a.lower() in text_lower:
+                    target_allergen = a
+                    break
+            a_res = self.execute_tool("check_item_allergen", {"item_name": target_dish, "allergen": target_allergen})
+            contains = a_res.get("contains_allergen", False)
+            if contains:
+                a_resp = f"⚠️ Notice: {target_dish} contains {target_allergen}. Please advise us if you have severe dietary sensitivities."
+            else:
+                a_resp = f"Good news! {target_dish} is free of {target_allergen}."
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "fsm_state": self.state,
+                "user_input": user_input,
+                "assistant_response": a_resp,
+                "thinking": f"[Allergen Audit: {target_dish} / {target_allergen}]",
+                "tool_calls": [{"tool": "check_item_allergen", "arguments": {"item_name": target_dish, "allergen": target_allergen}, "result": a_res}],
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
         turn_tool_calls: List[Dict[str, Any]] = []
 
-        max_tool_iterations = 5
+        max_tool_iterations = 3
         iteration = 0
         final_content = ""
         model_thinking = ""
         executed_signatures: Set[str] = set()
+        action_executed = False
 
         try:
             while iteration < max_tool_iterations:
@@ -1653,6 +2027,11 @@ class BistroFSMAgent:
                         except Exception:
                             fn_args = {}
 
+                    # Prevent duplicate reads or actions in the same turn
+                    if fn_name in ["view_current_order", "get_menu_by_category", "get_available_items", "get_unavailable_items", "get_last_order_item", "get_removed_items", "get_recommendations", "get_analytics_summary"]:
+                        if any(tc_prev["tool"] == fn_name for tc_prev in turn_tool_calls):
+                            continue
+
                     sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True)}"
                     if sig in executed_signatures:
                         tool_result = {
@@ -1668,6 +2047,8 @@ class BistroFSMAgent:
                             "arguments": fn_args,
                             "result": tool_result,
                         })
+                        if fn_name in ["add_item_to_order", "remove_item_from_order", "update_item_quantity", "confirm_order_and_deduct_stock", "clear_cart"]:
+                            action_executed = True
 
                     tool_msg = {
                         "role": "tool",
@@ -1676,7 +2057,7 @@ class BistroFSMAgent:
                     }
                     self.messages.append(tool_msg)
 
-                if not has_new_execution:
+                if not has_new_execution or action_executed:
                     break
 
             # Safety guard: ensure critical orders/checkouts execute
@@ -1709,6 +2090,14 @@ class BistroFSMAgent:
                             f"**Subtotal:** ₱{t_res.get('subtotal'):.2f} (12% VAT included: ₱{t_res.get('vat_12_pct_breakdown'):.2f})\n"
                             f"**Grand Total:** ₱{t_res.get('grand_total'):.2f}\n\nWould you like to confirm this order or make any changes?"
                         )
+                    elif t_name == "check_item_allergen" and t_res.get("status") == "success":
+                        contains = t_res.get("contains_allergen", False)
+                        it_name = t_res.get("item_name")
+                        al_name = t_res.get("allergen_queried")
+                        if contains:
+                            synthesis_parts.append(f"⚠️ Notice: {it_name} contains {al_name}. Please advise us if you have severe dietary sensitivities.")
+                        else:
+                            synthesis_parts.append(f"Good news! {it_name} is free of {al_name}.")
                     elif t_name == "add_item_to_order":
                         synthesis_parts.append(t_res.get("message", "Item updated in your order."))
                     elif t_name in ["remove_item_from_order", "clear_cart"]:
@@ -1759,6 +2148,15 @@ class BistroFSMAgent:
                         p_str = f" Chef pairings: {'; '.join(pairs[:2])}." if pairs else ""
                         synthesis_parts.append(f"Recommended crowd-favorites: Perpetual Classic Burger (₱150.00), Truffle Mushroom Pasta (₱210.00), Loaded Cheese Fries (₱110.00).{p_str}")
                 clean_text = "\n\n".join(synthesis_parts)
+
+            if clean_text:
+                # Deduplicate consecutive identical paragraphs
+                paragraphs = [p.strip() for p in clean_text.split("\n\n") if p.strip()]
+                deduped = []
+                for p in paragraphs:
+                    if not deduped or p != deduped[-1]:
+                        deduped.append(p)
+                clean_text = "\n\n".join(deduped)
 
             if not clean_text:
                 clean_text = final_content.strip() or "How can I assist you with your Perpetual Bistro order?"
