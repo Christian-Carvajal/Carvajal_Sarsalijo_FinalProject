@@ -1823,10 +1823,39 @@ class BistroFSMAgent:
                     except Exception:
                         pass
 
+                text_lower = user_input.lower()
+                has_allergen_words = any(w in text_lower for w in ["dairy", "lactose", "gluten", "allergen", "allergy", "allergies", "nuts", "egg", "pork", "shellfish"])
+                is_remove_intent = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal|only\s+1\s+item|only\s+item|remove\s+that|remove\s+it|cancel\s+that|alisin\s+yan|tanggalin\s+yan)\b", text_lower))
+
+                if has_allergen_words and not any(tc.get("function", {}).get("name") == "check_item_allergen" for tc in tool_calls):
+                    found_a = find_dishes_in_text(user_input)
+                    t_dish = found_a[0][0]["name"] if found_a else "Perpetual Classic Burger"
+                    t_allergen = "Dairy"
+                    for a in ["Gluten", "Nuts", "Egg", "Pork", "Shellfish", "Dairy"]:
+                        if a.lower() in text_lower:
+                            t_allergen = a
+                            break
+                    tool_calls = [{"function": {"name": "check_item_allergen", "arguments": {"item_name": t_dish, "allergen": t_allergen}}}]
+                elif is_remove_intent and not any(tc.get("function", {}).get("name") == "remove_item_from_order" for tc in tool_calls):
+                    cart_c = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+                    cart_i = cart_c.get("line_items", [])
+                    if cart_i:
+                        target_name = cart_i[0]["name"]
+                        found_r = find_dishes_in_text(user_input)
+                        if found_r:
+                            target_name = found_r[0][0]["name"]
+                        tool_calls = [{"function": {"name": "remove_item_from_order", "arguments": {"item_name": target_name}}}]
+                elif not tool_calls and not check_ambiguous_category_request(user_input) and any(w in text_lower for w in ["add", "buy", "order", "pabili", "bilhin", "pakidagdag"]):
+                    found_o = find_dishes_in_text(user_input)
+                    if found_o:
+                        tool_calls = [{"function": {"name": "add_item_to_order", "arguments": {"item_name": found_o[0][0]["name"], "qty": found_o[0][1], "instructions": found_o[0][2]}}}]
+
                 if not tool_calls:
                     final_content = raw_content
                     break
 
+                if not assistant_msg.get("tool_calls"):
+                    assistant_msg = {"role": "assistant", "content": "", "tool_calls": tool_calls}
                 self.messages.append(assistant_msg)
 
                 for tc in tool_calls:
