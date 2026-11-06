@@ -7,6 +7,8 @@ Handles SQLite operations, transactional integrity, stock deduction, and allerge
 import os
 import sqlite3
 import json
+import re
+import difflib
 from typing import Dict, Any, List, Optional
 import uuid
 
@@ -127,17 +129,75 @@ def get_all_categories(db_path: str = DB_PATH) -> List[str]:
 
 
 def _find_menu_item(item_query: str, conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
-    """Helper to locate a menu item by exact name or substring matching."""
+    """Helper to locate a menu item by exact name, alias, token overlap, or fuzzy match."""
     cursor = conn.cursor()
+    raw = item_query.strip()
+    cleaned = re.sub(r'^(the|a|an|yung|ang|mga)\s+', '', raw, flags=re.IGNORECASE).strip().lower()
+
+    # Fetch all menu items
+    cursor.execute("SELECT * FROM menu_items")
+    all_items = cursor.fetchall()
+    if not all_items:
+        return None
+
     # 1. Exact match (case insensitive)
-    cursor.execute("SELECT * FROM menu_items WHERE LOWER(name) = LOWER(?)", (item_query.strip(),))
-    row = cursor.fetchone()
-    if row:
-        return row
+    for it in all_items:
+        name_lower = it["name"].lower()
+        if name_lower == raw.lower() or name_lower == cleaned:
+            return it
 
     # 2. Substring match
-    cursor.execute("SELECT * FROM menu_items WHERE LOWER(name) LIKE LOWER(?) ORDER BY LENGTH(name) ASC LIMIT 1", (f"%{item_query.strip()}%",))
-    return cursor.fetchone()
+    for it in all_items:
+        name_lower = it["name"].lower()
+        if (len(cleaned) >= 3 and cleaned in name_lower) or (len(raw) >= 3 and raw.lower() in name_lower):
+            return it
+
+    # 3. Fuzzy & Token Overlap Similarity (handles typos, word reordering, shortened names)
+    import difflib
+    raw_tokens = set(re.findall(r'\w+', cleaned))
+    best_item = None
+    best_score = 0.0
+
+    for it in all_items:
+        name_lower = it["name"].lower()
+        m_tokens = set(re.findall(r'\w+', name_lower))
+
+        # Token overlap ratio
+        common = raw_tokens.intersection(m_tokens)
+        token_ratio = len(common) / max(len(raw_tokens), 1)
+
+        # Sequence matcher ratio (for typos like 'perpetul')
+        seq_ratio = difflib.SequenceMatcher(None, cleaned, name_lower).ratio()
+
+        # Token-level typo matching
+        token_typo_matches = 0
+        for r_tok in raw_tokens:
+            if len(r_tok) >= 4:
+                for m_tok in m_tokens:
+                    if difflib.SequenceMatcher(None, r_tok, m_tok).ratio() >= 0.70:
+                        token_typo_matches += 1
+                        break
+        typo_ratio = token_typo_matches / max(len(raw_tokens), 1)
+
+        score = max(token_ratio, seq_ratio, typo_ratio)
+
+        # High-confidence bonus for key dish identifiers
+        if ("perpetual" in cleaned or "perpetul" in cleaned) and ("burger" in cleaned or "classic" in cleaned) and it["name"] == "Perpetual Classic Burger":
+            score = 1.0
+        elif "calamansi" in cleaned and it["name"] == "Fresh Calamansi Iced Tea":
+            score = 1.0
+        elif "truffle" in cleaned and it["name"] == "Truffle Mushroom Pasta":
+            score = 1.0
+
+        if score > best_score:
+            best_score = score
+            best_item = it
+
+    # Threshold for fuzzy match: 0.40 is reliable for 2-3 word dishes
+    if best_item and best_score >= 0.40:
+        return best_item
+
+    return None
 
 
 # =====================================================================
@@ -376,6 +436,39 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
             }
 
         clean_name = (item_name or "").strip().lower()
+        # Contextual pronoun resolution from active cart in SQLite
+        generic_pronouns = [
+            "that", "it", "this", "item", "the item", "the only item", "only item",
+            "the only 1 item in the cart", "the only 1 item", "the 1 item", "cart item",
+            "only 1 item in the cart", "only 1 item", "that in the cart", "that in cart",
+            "item in the cart", "the item in the cart", "the dish", "dish", ""
+        ]
+        if clean_name in generic_pronouns:
+            cursor.execute(
+                "SELECT oli.item_id, mi.name FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id WHERE oli.session_id = ?",
+                (session_id,)
+            )
+            c_rows = cursor.fetchall()
+            if len(c_rows) == 0:
+                return {
+                    "status": "empty_cart",
+                    "success": False,
+                    "error": "Your cart is currently empty. There is nothing to remove.",
+                    "message": "Your cart is currently empty. There is nothing to remove.",
+                }
+            elif len(c_rows) == 1:
+                item_name = c_rows[0]["name"]
+                clean_name = item_name.lower().strip()
+            elif len(c_rows) > 1:
+                cursor.execute(
+                    "SELECT oli.item_id, mi.name FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id WHERE oli.session_id = ? ORDER BY oli.id DESC LIMIT 1",
+                    (session_id,)
+                )
+                last_r = cursor.fetchone()
+                if last_r:
+                    item_name = last_r["name"]
+                    clean_name = item_name.lower().strip()
+
         if clean_name in ["all", "everything", "clear", "clear_cart", "cart", "lahat", "all items", "order"]:
             cursor.execute(
                 "SELECT oli.item_id, mi.name, oli.quantity, oli.unit_price "
@@ -480,7 +573,7 @@ def update_item_quantity(session_id: str, item_name: str, qty: int, db_path: str
         )
         line = cursor.fetchone()
         if not line:
-            return {"status": "not_in_cart", "success": False, "error": f"'{item['name']}' is not in your current order.", "message": f"'{item['name']}' is not in your current order."}
+            return add_item_to_order(session_id, item["name"], qty=qty, db_path=db_path)
 
         cursor.execute(
             "UPDATE order_line_items SET quantity = ? WHERE id = ?",
