@@ -1928,16 +1928,15 @@
             gap: 6px;
         }
 
-        .tool-chip {
-            display: inline-block;
-            font-family: var(--font-mono);
-            font-size: 10px;
-            background: var(--uphsd-gold-light);
-            color: var(--uphsd-maroon);
-            padding: 2px 7px;
-            border-radius: var(--radius-pill);
-            border: 1px solid rgba(212, 175, 55, 0.4);
-            margin-top: 6px;
+        .tool-chip, .tool-call-badge {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
         }
 
         /* Quick Action Chips */
@@ -2965,6 +2964,31 @@
             border-color: var(--uphsd-maroon);
         }
 
+        .discount-pill {
+            background: #FFFFFF;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .discount-pill:hover {
+            border-color: var(--uphsd-maroon);
+            color: var(--uphsd-maroon);
+        }
+
+        .discount-pill.active {
+            background: var(--uphsd-maroon);
+            color: #FFFFFF;
+            border-color: var(--uphsd-maroon);
+            box-shadow: 0 2px 4px rgba(123, 17, 19, 0.2);
+        }
+
         /* =====================================================================
            MANAGER ANALYTICS & INVENTORY MODAL
            ===================================================================== */
@@ -3439,6 +3463,20 @@
 
                     <!-- Order Totals & Action Button -->
                     <div class="order-tab-footer">
+                        <!-- Statutory Discount Selector (20% Off for Student, Senior, PWD) -->
+                        <div class="discount-selector-cluster" style="margin-bottom: 12px; padding: 8px 10px; background: #F8FAFC; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                            <div style="font-size: 11px; font-weight: 800; color: var(--text-primary); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>🏷️ Statutory Discount (20% Off):</span>
+                                <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">RA 10645/10754</span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+                                <button type="button" class="discount-pill active" data-discount="NONE" onclick="applyCustomerDiscount('NONE')">None</button>
+                                <button type="button" class="discount-pill" data-discount="STUDENT" onclick="applyCustomerDiscount('STUDENT')">Student</button>
+                                <button type="button" class="discount-pill" data-discount="SENIOR" onclick="applyCustomerDiscount('SENIOR')">Senior</button>
+                                <button type="button" class="discount-pill" data-discount="PWD" onclick="applyCustomerDiscount('PWD')">PWD</button>
+                            </div>
+                        </div>
+
                         <div class="calc-row">
                             <span>Subtotal:</span>
                             <span id="tabSubtotal">₱0.00</span>
@@ -3448,8 +3486,8 @@
                             <span id="tabVat">₱0.00</span>
                         </div>
                         <div class="calc-row">
-                            <span>Campus Discount:</span>
-                            <span style="color: var(--accent-green); font-weight: 700;">-₱0.00</span>
+                            <span id="tabDiscountLabel">Campus Discount:</span>
+                            <span id="tabDiscountAmount" style="color: var(--accent-green); font-weight: 700;">-₱0.00</span>
                         </div>
                         <div class="calc-row total-row">
                             <span>Grand Total:</span>
@@ -3699,6 +3737,10 @@
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                         <div style="display: flex; justify-content: space-between;"><span>Subtotal:</span> <span id="recSubtotal">₱0.00</span></div>
                         <div style="display: flex; justify-content: space-between;"><span>12% VAT:</span> <span id="recVat">₱0.00</span></div>
+                        <div id="recDiscountRow" style="display: none; justify-content: space-between; color: var(--accent-green); font-weight: 700;">
+                            <span id="recDiscountLabel">Campus Discount:</span>
+                            <span id="recDiscountAmount">-₱0.00</span>
+                        </div>
                         <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 14px; margin-top: 4px; color: var(--uphsd-maroon);">
                             <span>TOTAL PAID / BILLED:</span> <span id="recTotal">₱0.00</span>
                         </div>
@@ -3752,6 +3794,20 @@
                     <div style="text-align: right;">
                         <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Table Session</div>
                         <div style="font-size: 13px; font-weight: 800; color: var(--text-primary);" id="payModalTable">Table #1</div>
+                    </div>
+                </div>
+
+                <!-- Statutory Discount declaration in Payment Modal -->
+                <div style="margin-bottom: 14px; padding: 10px 12px; background: #F8FAFC; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                    <div style="font-size: 11px; font-weight: 800; color: var(--text-primary); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>🏷️ Apply Discount (20% Off):</span>
+                        <span id="payModalDiscountStatus" style="font-size: 10px; color: var(--accent-green); font-weight: 700;">Regular (0%)</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+                        <button type="button" class="discount-pill active" data-discount="NONE" onclick="applyCustomerDiscount('NONE')">Regular</button>
+                        <button type="button" class="discount-pill" data-discount="STUDENT" onclick="applyCustomerDiscount('STUDENT')">Student (20%)</button>
+                        <button type="button" class="discount-pill" data-discount="SENIOR" onclick="applyCustomerDiscount('SENIOR')">Senior (20%)</button>
+                        <button type="button" class="discount-pill" data-discount="PWD" onclick="applyCustomerDiscount('PWD')">PWD (20%)</button>
                     </div>
                 </div>
 
@@ -4456,6 +4512,32 @@
             document.getElementById('tabVat').innerText = `₱${(cart.vat_12_pct_breakdown || 0).toFixed(2)}`;
             document.getElementById('tabGrandTotal').innerText = `₱${(cart.grand_total || 0).toFixed(2)}`;
 
+            const discAmount = cart.discount_amount || 0;
+            const discType = cart.discount_type || 'NONE';
+            const tabDiscAmount = document.getElementById('tabDiscountAmount');
+            const tabDiscLabel = document.getElementById('tabDiscountLabel');
+            if (tabDiscAmount) {
+                tabDiscAmount.innerText = `-₱${discAmount.toFixed(2)}`;
+            }
+            if (tabDiscLabel) {
+                tabDiscLabel.innerText = discType !== 'NONE' ? `Statutory Discount (${discType} - 20%):` : 'Campus Discount:';
+            }
+            document.querySelectorAll('.discount-pill').forEach(btn => {
+                if (btn.getAttribute('data-discount') === discType) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            const payStatus = document.getElementById('payModalDiscountStatus');
+            if (payStatus) {
+                payStatus.innerText = discType !== 'NONE' ? `${discType} (20% Off: -₱${discAmount.toFixed(2)})` : 'Regular (0%)';
+            }
+            const payTotal = document.getElementById('payModalTotal');
+            if (payTotal) {
+                payTotal.innerText = `₱${(cart.grand_total || 0).toFixed(2)}`;
+            }
+
             const confirmBtn = document.getElementById('btnConfirmOrder');
             const confirmTotal = document.getElementById('btnConfirmTotal');
 
@@ -4542,6 +4624,25 @@
             }
         }
 
+        async function applyCustomerDiscount(type) {
+            try {
+                const res = await fetch('/api/discount', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({discount_type: type})
+                });
+                const data = await res.json();
+                if (data.cart) {
+                    renderCart(data.cart);
+                }
+                const msg = data.result?.message || `Discount updated to ${type}`;
+                showToast(msg, '🏷️');
+            } catch(e) {
+                console.error("Discount update failed:", e);
+                showToast("Failed to update discount.", "⚠️");
+            }
+        }
+
         function confirmActiveOrder() {
             openPaymentModal();
         }
@@ -4588,6 +4689,21 @@
             document.getElementById('recSubtotal').innerText = `₱${(receipt.subtotal || 0).toFixed(2)}`;
             document.getElementById('recVat').innerText = `₱${(receipt.vat_included || 0).toFixed(2)}`;
             document.getElementById('recTotal').innerText = `₱${(receipt.grand_total || 0).toFixed(2)}`;
+
+            const discRow = document.getElementById('recDiscountRow');
+            const discLabel = document.getElementById('recDiscountLabel');
+            const discAmountEl = document.getElementById('recDiscountAmount');
+            const discAmount = receipt.discount_amount || 0;
+            const discType = receipt.discount_type || 'NONE';
+            if (discRow) {
+                if (discAmount > 0) {
+                    discRow.style.display = 'flex';
+                    if (discLabel) discLabel.innerText = `Statutory Discount (${discType} - 20%):`;
+                    if (discAmountEl) discAmountEl.innerText = `-₱${discAmount.toFixed(2)}`;
+                } else {
+                    discRow.style.display = 'none';
+                }
+            }
 
             // Payment verification badge
             const payBadge = document.getElementById('recPaymentBadge');
@@ -4745,7 +4861,8 @@
                 // Clear placeholder and replay stored conversation
                 scroll.innerHTML = '';
                 history.forEach(item => {
-                    appendChatBubble(item.sender, item.text, item.toolCalls || [], false);
+                    const cleanText = (item.text || '').replace(/<span class="tool-chip">.*?<\/span>/gi, '').replace(/<div class="tool-call-badge">.*?<\/div>/gi, '').trim();
+                    appendChatBubble(item.sender, cleanText, [], false);
                 });
                 scroll.scrollTop = scroll.scrollHeight;
             } catch(e) {

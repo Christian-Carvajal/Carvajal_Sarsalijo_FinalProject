@@ -170,6 +170,9 @@ if HAS_FASTAPI:
         restock_all: Optional[bool] = False
         target_min: Optional[int] = 20
 
+    class DiscountRequest(BaseModel):
+        discount_type: str = "NONE"
+
     class VoiceTranscribeRequest(BaseModel):
         audio_base64: str
         language: Optional[str] = "filipino"
@@ -255,6 +258,13 @@ if HAS_FASTAPI:
         res = db_tools.remove_item_from_order(active_agent.session_id, req.item_name)
         cart = db_tools.view_current_order(active_agent.session_id)
         return {"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)}
+
+    @app.post("/api/discount")
+    def set_discount_endpoint(req: DiscountRequest):
+        global active_agent
+        res = db_tools.apply_customer_discount(active_agent.session_id, req.discount_type)
+        cart = db_tools.view_current_order(active_agent.session_id)
+        return {"result": res, "cart": cart, "fsm_state": active_agent.state}
 
     @app.post("/api/table/switch")
     def switch_table_endpoint(req: TableSwitchRequest):
@@ -521,6 +531,13 @@ class NativeKioskHandler(BaseHTTPRequestHandler):
             res = db_tools.remove_item_from_order(active_agent.session_id, body.get("item_name", ""))
             cart = db_tools.view_current_order(active_agent.session_id)
             self._send_json({"result": res, "cart": cart, "fsm_state": res.get("fsm_state", active_agent.state)})
+            return
+
+        elif path == "/api/discount":
+            disc_type = body.get("discount_type", "NONE")
+            res = db_tools.apply_customer_discount(active_agent.session_id, disc_type)
+            cart = db_tools.view_current_order(active_agent.session_id)
+            self._send_json({"result": res, "cart": cart, "fsm_state": active_agent.state})
             return
 
         elif path == "/api/confirm":

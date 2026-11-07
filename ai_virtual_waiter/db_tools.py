@@ -587,10 +587,10 @@ def clear_cart(session_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
     return remove_item_from_order(session_id, "all", db_path=db_path)
 
 
-def replace_order_item(session_id: str, old_item: str, new_item: str, new_qty: int = 1, db_path: str = DB_PATH) -> Dict[str, Any]:
+def replace_order_item(session_id: str, old_item: str, new_item: str, new_qty: int = 1, old_qty: int = 1, db_path: str = DB_PATH) -> Dict[str, Any]:
     """
     Substitutes / replaces an item in the customer's active order tab with another menu item.
-    Safely resolves generic categories from current cart, removes old_item, adds new_item, and updates the bill.
+    Supports partial replacement (e.g. replacing 1 of 3 burgers leaves 2 burgers in the cart).
     """
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
@@ -604,9 +604,15 @@ def replace_order_item(session_id: str, old_item: str, new_item: str, new_qty: i
                 "message": "Cannot modify order. This tab has already been confirmed and finalized.",
             }
 
-        # Resolve old_item from active cart if generic (e.g. 'burger')
+        # Resolve old_item from active cart
         cursor.execute(
-            "SELECT oli.item_id, mi.name, mi.category FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id WHERE oli.session_id = ?",
+            """
+            SELECT oli.id, oli.item_id, oli.quantity, oli.unit_price, mi.name, mi.category
+            FROM order_line_items oli
+            JOIN menu_items mi ON oli.item_id = mi.id
+            WHERE oli.session_id = ?
+            ORDER BY oli.id ASC
+            """,
             (session_id,)
         )
         cart_rows = cursor.fetchall()
@@ -619,58 +625,234 @@ def replace_order_item(session_id: str, old_item: str, new_item: str, new_qty: i
             }
 
         target_old_name = old_item.strip()
-        matched_cart_item = None
+        matched_row = None
 
-        # Check if old_item matches exact or partial name in cart
+        # 1. Exact or partial name match
         for r in cart_rows:
             r_name = r["name"].lower()
             if target_old_name.lower() in r_name or r_name in target_old_name.lower():
-                matched_cart_item = r["name"]
+                matched_row = r
                 break
 
-        # Check if target_old_name is a generic category (e.g. 'burger', 'pasta', 'drink')
-        if not matched_cart_item:
+        # 2. Token overlap match (e.g. 'perpetual cheeseburger' -> 'Perpetual Classic Burger')
+        if not matched_row:
+            target_tokens = set(re.findall(r"\w+", target_old_name.lower()))
+            best_score = 0
+            best_r = None
+            for r in cart_rows:
+                r_tokens = set(re.findall(r"\w+", r["name"].lower()))
+                overlap = len(target_tokens & r_tokens)
+                if overlap > best_score:
+                    best_score = overlap
+                    best_r = r
+            if best_score > 0 and best_r:
+                matched_row = best_r
+
+        # 3. Generic category match (e.g. 'burger', 'pasta', 'drink')
+        if not matched_row:
             old_low = target_old_name.lower()
             for r in cart_rows:
                 r_cat = (r["category"] or "").lower()
                 r_name = r["name"].lower()
                 if old_low in r_cat or old_low in r_name or ("burger" in old_low and "burger" in r_name):
-                    matched_cart_item = r["name"]
+                    matched_row = r
                     break
 
-        if matched_cart_item:
-            target_old_name = matched_cart_item
+        if not matched_row:
+            return {
+                "status": "error",
+                "success": False,
+                "message": f"Could not find '{target_old_name}' in your active order cart.",
+            }
 
-    # Step 1: Remove old item
-    rem_res = remove_item_from_order(session_id, target_old_name, db_path=db_path)
-    if not rem_res.get("success"):
-        return {
-            "status": "error",
-            "success": False,
-            "message": rem_res.get("message", f"Could not find or remove '{target_old_name}' from your order tab."),
-        }
-    actual_old_name = rem_res.get("removed_item", target_old_name)
+        actual_old_name = matched_row["name"]
+        current_old_qty = matched_row["quantity"]
+        line_id = matched_row["id"]
+        unit_price = matched_row["unit_price"]
+
+        # Step 1: Decrement or remove old item
+        effective_old_qty = min(max(1, old_qty), current_old_qty)
+        remaining_old_qty = current_old_qty - effective_old_qty
+
+        if remaining_old_qty > 0:
+            cursor.execute(
+                "UPDATE order_line_items SET quantity = ? WHERE id = ?",
+                (remaining_old_qty, line_id),
+            )
+            cursor.execute(
+                "INSERT INTO removed_order_items (session_id, item_id, item_name, quantity, unit_price, reason) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, matched_row["item_id"], actual_old_name, effective_old_qty, unit_price, f"Replaced with {new_item}")
+            )
+        else:
+            cursor.execute("DELETE FROM order_line_items WHERE id = ?", (line_id,))
+            cursor.execute(
+                "INSERT INTO removed_order_items (session_id, item_id, item_name, quantity, unit_price, reason) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, matched_row["item_id"], actual_old_name, current_old_qty, unit_price, f"Replaced with {new_item}")
+            )
+        conn.commit()
 
     # Step 2: Add new item
     add_res = add_item_to_order(session_id, new_item, qty=new_qty, db_path=db_path)
     if not add_res.get("success"):
+        # Rollback partial removal if add failed
+        with get_db_connection(db_path) as conn:
+            cursor = conn.cursor()
+            if remaining_old_qty > 0:
+                cursor.execute("UPDATE order_line_items SET quantity = ? WHERE id = ?", (current_old_qty, line_id))
+            else:
+                cursor.execute(
+                    "INSERT INTO order_line_items (session_id, item_id, quantity, unit_price, special_instructions) VALUES (?, ?, ?, ?, '')",
+                    (session_id, matched_row["item_id"], current_old_qty, unit_price)
+                )
+            conn.commit()
         return {
             "status": "partial_error",
             "success": False,
-            "message": f"Removed {actual_old_name}, but could not add {new_item}: {add_res.get('message')}",
+            "message": f"Could not add '{new_item}' ({add_res.get('message')}). Kept original {current_old_qty}x {actual_old_name}.",
             "old_item": actual_old_name,
         }
 
     actual_new_name = add_res.get("added_item", {}).get("name", new_item)
+    rem_msg = f" You still have {remaining_old_qty}x {actual_old_name} in your cart." if remaining_old_qty > 0 else ""
     return {
         "status": "success",
         "success": True,
-        "message": f"Successfully replaced {actual_old_name} with {new_qty}x {actual_new_name} in your order tab.",
+        "message": f"Successfully replaced {effective_old_qty}x {actual_old_name} with {new_qty}x {actual_new_name} in your order tab!{rem_msg}",
         "old_item": actual_old_name,
         "new_item": actual_new_name,
+        "old_qty_replaced": effective_old_qty,
+        "remaining_old_qty": remaining_old_qty,
         "quantity": new_qty,
         "new_order_subtotal": add_res.get("new_order_subtotal"),
         "new_order_total": add_res.get("new_order_total"),
+    }
+
+
+def remove_order_by_ordinal(session_id: str, ordinal_position: int = 1, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Removes an item from the customer's cart based on the chronological order it was added.
+    ordinal_position: 1 for first order, 2 for second order, 3 for third order, -1 for last order.
+    """
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM table_sessions WHERE session_id = ?", (session_id,))
+        sess_row = cursor.fetchone()
+        if sess_row and sess_row["status"] == "STATE_CONFIRMED":
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Cannot modify order. This tab has already been confirmed and finalized.",
+                "message": "Cannot modify order. This tab has already been confirmed and finalized.",
+            }
+
+        cursor.execute(
+            """
+            SELECT oli.id, oli.item_id, oli.quantity, oli.unit_price, mi.name, oli.created_at
+            FROM order_line_items oli
+            JOIN menu_items mi ON oli.item_id = mi.id
+            WHERE oli.session_id = ?
+            ORDER BY oli.id ASC
+            """,
+            (session_id,)
+        )
+        cart_rows = cursor.fetchall()
+        if not cart_rows:
+            return {
+                "status": "empty_cart",
+                "success": False,
+                "error": "Your order tab is currently empty. There is nothing to remove.",
+                "message": "Your order tab is currently empty. There is nothing to remove.",
+            }
+
+        total_orders = len(cart_rows)
+        target_idx = -1
+
+        if ordinal_position == -1:
+            target_idx = total_orders - 1
+            ord_name = "last"
+        elif 1 <= ordinal_position <= total_orders:
+            target_idx = ordinal_position - 1
+            suffixes = {1: "1st", 2: "2nd", 3: "3rd"}
+            ord_name = suffixes.get(ordinal_position, f"{ordinal_position}th")
+        else:
+            return {
+                "status": "out_of_bounds",
+                "success": False,
+                "error": f"Your cart currently has {total_orders} line item(s). There is no #{ordinal_position} order to remove.",
+                "message": f"Your cart currently has {total_orders} line item(s). There is no #{ordinal_position} order to remove.",
+            }
+
+        target_row = cart_rows[target_idx]
+        target_id = target_row["id"]
+        target_name = target_row["name"]
+        target_qty = target_row["quantity"]
+        unit_price = target_row["unit_price"]
+
+        cursor.execute("DELETE FROM order_line_items WHERE id = ?", (target_id,))
+        cursor.execute(
+            "INSERT INTO removed_order_items (session_id, item_id, item_name, quantity, unit_price, reason) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, target_row["item_id"], target_name, target_qty, unit_price, f"Customer removed {ord_name} order item")
+        )
+        conn.commit()
+
+        updated_order = view_current_order(session_id, db_path=db_path)
+        return {
+            "status": "success",
+            "success": True,
+            "message": f"Removed {target_qty}x {target_name} (the {ord_name} order item added to your cart). Your updated total is ₱{updated_order['grand_total']:.2f}.",
+            "removed_item": target_name,
+            "quantity": target_qty,
+            "ordinal_position": ordinal_position,
+            "ordinal_label": ord_name,
+            "new_order_total": updated_order["grand_total"],
+            "remaining_items": updated_order["item_count"],
+        }
+
+
+def apply_customer_discount(session_id: str, discount_type: str = "NONE", db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Applies a 20% statutory discount for PWD, Senior Citizen, or Student.
+    discount_type: 'STUDENT', 'SENIOR', 'PWD', or 'NONE'
+    """
+    disc_upper = (discount_type or "NONE").strip().upper()
+    valid_discounts = {"STUDENT", "SENIOR", "PWD"}
+    discount_pct = 0.20 if disc_upper in valid_discounts else 0.0
+    if disc_upper not in valid_discounts:
+        disc_upper = "NONE"
+
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        # Defensive schema migration
+        cursor.execute("PRAGMA table_info(table_sessions)")
+        cols = [col["name"] for col in cursor.fetchall()]
+        if "discount_type" not in cols:
+            cursor.execute("ALTER TABLE table_sessions ADD COLUMN discount_type TEXT DEFAULT 'NONE'")
+        if "discount_pct" not in cols:
+            cursor.execute("ALTER TABLE table_sessions ADD COLUMN discount_pct REAL DEFAULT 0.0")
+
+        cursor.execute(
+            "UPDATE table_sessions SET discount_type = ?, discount_pct = ? WHERE session_id = ?",
+            (disc_upper, discount_pct, session_id),
+        )
+        conn.commit()
+
+    updated = view_current_order(session_id, db_path=db_path)
+    if discount_pct > 0.0:
+        msg = f"Applied 20% {disc_upper} statutory discount! You save ₱{updated['discount_amount']:.2f}. New grand total: ₱{updated['grand_total']:.2f}."
+    else:
+        msg = f"Removed discount. Cart total is regular price: ₱{updated['grand_total']:.2f}."
+
+    return {
+        "status": "success",
+        "success": True,
+        "session_id": session_id,
+        "discount_type": disc_upper,
+        "discount_pct": discount_pct,
+        "discount_amount": updated["discount_amount"],
+        "subtotal": updated["subtotal"],
+        "grand_total": updated["grand_total"],
+        "message": msg,
+        "cart": updated,
     }
 
 
@@ -735,10 +917,19 @@ def view_current_order(session_id: str, db_path: str = DB_PATH) -> Dict[str, Any
     """
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT table_no, status FROM table_sessions WHERE session_id = ?", (session_id,))
+        cursor.execute("PRAGMA table_info(table_sessions)")
+        cols = [col["name"] for col in cursor.fetchall()]
+        if "discount_type" not in cols:
+            cursor.execute("ALTER TABLE table_sessions ADD COLUMN discount_type TEXT DEFAULT 'NONE'")
+        if "discount_pct" not in cols:
+            cursor.execute("ALTER TABLE table_sessions ADD COLUMN discount_pct REAL DEFAULT 0.0")
+
+        cursor.execute("SELECT table_no, status, discount_type, discount_pct FROM table_sessions WHERE session_id = ?", (session_id,))
         session_row = cursor.fetchone()
         table_no = session_row["table_no"] if session_row else "Unknown"
         status = session_row["status"] if session_row else "STATE_GREETING"
+        discount_type = (session_row["discount_type"] or "NONE").upper() if session_row else "NONE"
+        discount_pct = float(session_row["discount_pct"] or 0.0) if session_row else 0.0
 
         cursor.execute(
             """
@@ -772,9 +963,10 @@ def view_current_order(session_id: str, db_path: str = DB_PATH) -> Dict[str, Any
                 "allergens": line["allergens"],
             })
 
-        # Calculations: Subtotal, 12% Government VAT included/standard, Grand Total
+        # Calculations: Subtotal, 12% Government VAT included, 20% Statutory Discount (PWD/Senior/Student), Grand Total
         vat_amount = round(subtotal * 0.12, 2)
-        grand_total = round(subtotal, 2)  # Standard campus dining retail includes tax in menu prices
+        discount_amount = round(subtotal * discount_pct, 2)
+        grand_total = max(0.0, round(subtotal - discount_amount, 2))
 
         return {
             "status": "success",
@@ -786,6 +978,9 @@ def view_current_order(session_id: str, db_path: str = DB_PATH) -> Dict[str, Any
             "items": items,
             "line_items": items,
             "subtotal": round(subtotal, 2),
+            "discount_type": discount_type,
+            "discount_pct": discount_pct,
+            "discount_amount": discount_amount,
             "vat": vat_amount,
             "vat_12_pct_breakdown": vat_amount,
             "grand_total": grand_total,
@@ -891,6 +1086,9 @@ def confirm_order_and_deduct_stock(session_id: str, db_path: str = DB_PATH) -> D
                 "message": "Order successfully finalized and confirmed! Kitchen ticket dispatched.",
                 "itemized_receipt": tab["line_items"],
                 "subtotal": tab["subtotal"],
+                "discount_type": tab.get("discount_type", "NONE"),
+                "discount_pct": tab.get("discount_pct", 0.0),
+                "discount_amount": tab.get("discount_amount", 0.0),
                 "vat_included": tab["vat_12_pct_breakdown"],
                 "grand_total": tab["grand_total"],
                 "currency": "Philippine Pesos (pesos, ₱)",
