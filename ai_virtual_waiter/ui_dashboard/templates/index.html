@@ -1831,6 +1831,7 @@
            VIEW 3: AI WAITER DIALOGUE DRAWER / DEDICATED VIEW
            ===================================================================== */
         .ai-waiter-pane {
+            position: relative;
             background-color: var(--bg-surface);
             border-radius: var(--radius-lg);
             border: 1px solid var(--border-subtle);
@@ -2258,6 +2259,232 @@
             font-weight: 700;
             cursor: pointer;
             box-shadow: var(--shadow-maroon);
+        }
+
+        /* In-Chat Floating Menu Button & Floater Modal */
+        .btn-floating-menu {
+            position: absolute;
+            bottom: 110px;
+            right: 24px;
+            z-index: 40;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, var(--uphsd-maroon), var(--uphsd-maroon-dark));
+            color: #FFFFFF;
+            border: 1.5px solid var(--uphsd-gold);
+            border-radius: 9999px;
+            padding: 10px 18px;
+            font-size: 13px;
+            font-weight: 800;
+            box-shadow: 0 8px 24px rgba(123, 17, 19, 0.45);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-floating-menu:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 12px 28px rgba(123, 17, 19, 0.6);
+            border-color: #FDE047;
+        }
+
+        .menu-floater-card {
+            max-width: 650px;
+            width: 95%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .floater-controls {
+            padding: 14px 20px 10px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-surface);
+        }
+
+        .floater-search-wrap {
+            margin-bottom: 10px;
+        }
+
+        .floater-search-input {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            border: 1.5px solid var(--border-subtle);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s ease;
+            background: #FFFFFF;
+            box-sizing: border-box;
+        }
+
+        .floater-search-input:focus {
+            border-color: var(--uphsd-maroon);
+            box-shadow: 0 0 0 3px rgba(123, 17, 19, 0.12);
+        }
+
+        .floater-category-bar {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            scrollbar-width: none;
+        }
+
+        .floater-category-bar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .floater-cat-pill {
+            padding: 6px 12px;
+            border-radius: 9999px;
+            border: 1px solid var(--border-subtle);
+            background: #FFFFFF;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .floater-cat-pill:hover {
+            border-color: var(--uphsd-maroon);
+            color: var(--uphsd-maroon);
+        }
+
+        .floater-cat-pill.active {
+            background: var(--uphsd-maroon);
+            color: #FFFFFF;
+            border-color: var(--uphsd-maroon);
+        }
+
+        .floater-items-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #FAFAF9;
+        }
+
+        .floater-item-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 10px 14px;
+            background: #FFFFFF;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .floater-item-row:hover {
+            border-color: var(--uphsd-gold);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .floater-item-thumb {
+            width: 60px;
+            height: 60px;
+            border-radius: var(--radius-sm);
+            object-fit: cover;
+            flex-shrink: 0;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .floater-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .floater-item-name {
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .floater-item-price {
+            color: var(--uphsd-maroon);
+            font-weight: 800;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .floater-item-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin: 2px 0 4px 0;
+        }
+
+        .floater-item-meta {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .floater-cat-tag {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--uphsd-maroon);
+            background: rgba(123, 17, 19, 0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .floater-item-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .btn-floater-add {
+            background: var(--uphsd-maroon);
+            color: #FFFFFF;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-floater-add:hover {
+            background: var(--uphsd-maroon-dark);
+        }
+
+        .btn-floater-ask {
+            background: #FFFFFF;
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-floater-ask:hover {
+            border-color: var(--uphsd-maroon);
+            color: var(--uphsd-maroon);
         }
 
         /* Receipt View */
@@ -3251,8 +3478,14 @@
                             <div class="waiter-meta-subtitle" id="waiterMetaVoice">Voice: Rosa (Filipino Taglish) • Active for Table #1</div>
                         </div>
                     </div>
-                    <button class="btn-card-add" onclick="switchView('kiosk')">View Menu 🍽️</button>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button class="btn-card-add" style="background: linear-gradient(135deg, var(--uphsd-gold), #B45309); color: #1E1215; border: 1.5px solid #FDE047; box-shadow: 0 4px 12px rgba(212, 175, 55, 0.35); font-weight: 800; display: inline-flex; align-items: center; gap: 6px;" onclick="openMenuFloater()">📖 Menu Directory</button>
+                        <button class="btn-card-customize" style="background: rgba(255, 255, 255, 0.15); color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.3); font-weight: 600;" onclick="switchView('kiosk')" title="Full Tablet Kiosk Grid">🖥️ Full Kiosk</button>
+                    </div>
                 </div>
+
+                <!-- Floating Quick Menu Button in Chat View -->
+                <button id="btnFloatingMenu" class="btn-floating-menu" onclick="openMenuFloater()" title="Open In-Chat Menu Directory">📖 Quick Menu Sheet</button>
 
                 <!-- Chat History Scroll -->
                 <div id="chatScroll" class="chat-messages-container">
@@ -3342,6 +3575,44 @@
         </section>
 
     </main>
+
+    <!-- =====================================================================
+         MENU FLOATER MODAL (In-Chat Menu Quick Directory)
+         ===================================================================== -->
+    <div id="menuFloaterModal" class="modal-overlay" onclick="if(event.target===this) closeMenuFloater()">
+        <div class="modal-card menu-floater-card">
+            <div class="modal-header">
+                <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+                    <span>📖</span> Perpetual Bistro Menu Directory
+                </div>
+                <button class="btn-modal-close" onclick="closeMenuFloater()">×</button>
+            </div>
+            <div class="floater-controls">
+                <div class="floater-search-wrap">
+                    <input type="text" id="floaterSearchInput" class="floater-search-input" placeholder="🔍 Search burgers, pastas, drinks, allergens..." oninput="filterMenuFloater()">
+                </div>
+                <div class="floater-category-bar">
+                    <button class="floater-cat-pill active" onclick="setFloaterCategory('all', this)">All</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Burgers', this)">🍔 Burgers</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Pastas', this)">🍝 Pastas</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Beverages', this)">🥤 Beverages</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Sides', this)">🍟 Sides</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Desserts', this)">🍰 Desserts</button>
+                    <button class="floater-cat-pill" onclick="setFloaterCategory('Combos', this)">🍱 Combos</button>
+                </div>
+            </div>
+            <div id="menuFloaterList" class="floater-items-scroll">
+                <!-- Dynamically populated rows -->
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;">
+                <span id="floaterItemCount" style="font-size: 13px; color: var(--text-muted); font-weight: 600;">23 dishes available</span>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-modal-secondary" onclick="closeMenuFloater()">Close</button>
+                    <button class="btn-modal-primary" onclick="closeMenuFloater(); switchView('kiosk');">Open Full Kiosk →</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- =====================================================================
          CUSTOMIZATION MODAL
@@ -3706,30 +3977,32 @@
         let pendingCustomizeItem = null;
         let isRecording = null;
 
-        // Food Photography High-Res Unsplash Mapping (Verified 100% HTTP 200)
+        // Food Photography Local SVG Asset Mapping (100% Offline Local Presentation Ready)
         const FOOD_PHOTOS = {
-            "Perpetual Classic Burger": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&auto=format&fit=crop&q=80",
-            "Bacon Mushroom Melt Burger": "https://images.unsplash.com/photo-1553979459-d2229ba7433b?w=600&auto=format&fit=crop&q=80",
-            "Grilled Chicken Pesto Sandwich": "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=600&auto=format&fit=crop&q=80",
-            "Crispy Buffalo Chicken Tenders": "https://images.unsplash.com/photo-1562967914-608f82629710?w=600&auto=format&fit=crop&q=80",
-            "Truffle Mushroom Pasta": "https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=600&auto=format&fit=crop&q=80",
-            "Classic Spaghetti Bolognese": "https://images.unsplash.com/photo-1551892374-ecf8754cf8b0?w=600&auto=format&fit=crop&q=80",
-            "Creamy Carbonara": "https://images.unsplash.com/photo-1612874742237-6526221588e3?w=600&auto=format&fit=crop&q=80",
-            "Golden French Fries": "https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?w=600&auto=format&fit=crop&q=80",
-            "Loaded Cheese Fries": "https://images.unsplash.com/photo-1585109649139-366815a0d713?w=600&auto=format&fit=crop&q=80",
-            "Crispy Onion Rings": "https://images.unsplash.com/photo-1582169296194-e4d644c48063?w=600&auto=format&fit=crop&q=80",
-            "Garden Fresh Caesar Salad": "https://images.unsplash.com/photo-1550304943-4f24f54ddde9?w=600&auto=format&fit=crop&q=80",
-            "Iced Caramel Macchiato": "https://images.unsplash.com/photo-1517256064527-09c73fc73e38?w=600&auto=format&fit=crop&q=80",
-            "Classic Brewed Coffee": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=600&auto=format&fit=crop&q=80",
-            "Fresh Calamansi Iced Tea": "https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=600&auto=format&fit=crop&q=80",
-            "Mango Passionfruit Smoothie": "https://images.unsplash.com/photo-1502741224143-90386d7f8c82?w=600&auto=format&fit=crop&q=80",
-            "Molten Lava Chocolate Cake": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&auto=format&fit=crop&q=80",
-            "Classic New York Cheesecake": "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=600&auto=format&fit=crop&q=80",
-            "Perpetual Champion Combo": "https://images.unsplash.com/photo-1550547660-d9450f859349?w=600&auto=format&fit=crop&q=80",
-            "Pasta & Sweet Treat Combo": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600&auto=format&fit=crop&q=80",
-            "Executive Chefs' Special Duo": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80",
-            "Chef Ezekiel's Special Duo": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80",
-            "Late Night Study Fuel Combo": "https://images.unsplash.com/photo-1576107232684-1279f3908594?w=600&auto=format&fit=crop&q=80"
+            "Perpetual Classic Burger": "/static/images/perpetual_classic_burger.svg",
+            "Bacon Mushroom Melt Burger": "/static/images/bacon_mushroom_melt_burger.svg",
+            "Grilled Chicken Pesto Sandwich": "/static/images/grilled_chicken_pesto_sandwich.svg",
+            "Crispy Buffalo Chicken Tenders": "/static/images/crispy_buffalo_chicken_tenders.svg",
+            "Truffle Mushroom Pasta": "/static/images/truffle_mushroom_pasta.svg",
+            "Classic Spaghetti Bolognese": "/static/images/classic_spaghetti_bolognese.svg",
+            "Creamy Carbonara": "/static/images/creamy_carbonara.svg",
+            "Pan-Seared Salmon": "/static/images/pan_seared_salmon.svg",
+            "Crispy Slice Salmon": "/static/images/crispy_slice_salmon.svg",
+            "Golden French Fries": "/static/images/golden_french_fries.svg",
+            "Loaded Cheese Fries": "/static/images/loaded_cheese_fries.svg",
+            "Crispy Onion Rings": "/static/images/crispy_onion_rings.svg",
+            "Garden Fresh Caesar Salad": "/static/images/garden_fresh_caesar_salad.svg",
+            "Iced Caramel Macchiato": "/static/images/iced_caramel_macchiato.svg",
+            "Classic Brewed Coffee": "/static/images/classic_brewed_coffee.svg",
+            "Fresh Calamansi Iced Tea": "/static/images/fresh_calamansi_iced_tea.svg",
+            "Mango Passionfruit Smoothie": "/static/images/mango_passionfruit_smoothie.svg",
+            "Molten Lava Chocolate Cake": "/static/images/molten_lava_chocolate_cake.svg",
+            "Classic New York Cheesecake": "/static/images/classic_new_york_cheesecake.svg",
+            "Perpetual Champion Combo": "/static/images/perpetual_champion_combo.svg",
+            "Pasta & Sweet Treat Combo": "/static/images/pasta_sweet_treat_combo.svg",
+            "Executive Chefs' Special Duo": "/static/images/executive_chefs_special_duo.svg",
+            "Chef Ezekiel's Special Duo": "/static/images/executive_chefs_special_duo.svg",
+            "Late Night Study Fuel Combo": "/static/images/late_night_study_fuel_combo.svg"
         };
 
         const BESTSELLERS = [
@@ -3750,12 +4023,119 @@
             "Perpetual Champion Combo": "🍱 TOP VALUE COMBO"
         };
 
-        // Initialize Application
+        // In-Chat Menu Floater State & Filtering
+        let floaterActiveCategory = 'all';
+
+        function openMenuFloater() {
+            renderMenuFloaterItems();
+            document.getElementById('menuFloaterModal').classList.add('show');
+            setTimeout(() => {
+                const search = document.getElementById('floaterSearchInput');
+                if (search) search.focus();
+            }, 100);
+        }
+
+        function closeMenuFloater() {
+            document.getElementById('menuFloaterModal').classList.remove('show');
+        }
+
+        function setFloaterCategory(cat, btn) {
+            floaterActiveCategory = cat;
+            document.querySelectorAll('.floater-cat-pill').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            renderMenuFloaterItems();
+        }
+
+        function filterMenuFloater() {
+            renderMenuFloaterItems();
+        }
+
+        function renderMenuFloaterItems() {
+            const list = document.getElementById('menuFloaterList');
+            if (!list) return;
+
+            const q = (document.getElementById('floaterSearchInput')?.value || '').toLowerCase().trim();
+            const filtered = allMenuItems.filter(it => {
+                if (floaterActiveCategory !== 'all' && it.category !== floaterActiveCategory) {
+                    return false;
+                }
+                if (q) {
+                    const matchName = (it.name || '').toLowerCase().includes(q);
+                    const matchDesc = (it.description || '').toLowerCase().includes(q);
+                    const matchCat = (it.category || '').toLowerCase().includes(q);
+                    const matchAllergen = (it.allergens || '').toLowerCase().includes(q);
+                    if (!matchName && !matchDesc && !matchCat && !matchAllergen) return false;
+                }
+                return true;
+            });
+
+            const countEl = document.getElementById('floaterItemCount');
+            if (countEl) countEl.innerText = `${filtered.length} dishes available`;
+
+            if (filtered.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                        <div style="font-size: 32px; margin-bottom: 6px;">🍽️</div>
+                        <div style="font-weight: 700; color: var(--text-primary); font-size: 15px;">No dishes matched</div>
+                        <div style="font-size: 12px;">Try another search keyword or category tab.</div>
+                    </div>`;
+                return;
+            }
+
+            list.innerHTML = filtered.map(it => {
+                const imgUrl = FOOD_PHOTOS[it.name] || '/static/images/perpetual_classic_burger.svg';
+                const escapedName = (it.name || '').replace(/'/g, "\\'");
+                const allergenTags = (it.allergens || '').split(',')
+                    .map(a => a.trim())
+                    .filter(a => a && a !== 'None')
+                    .map(a => `<span class="allergen-tag" style="font-size: 10px; padding: 1px 5px;">${a}</span>`)
+                    .join('');
+
+                const isOutOfStock = it.stock_qty <= 0;
+                return `
+                    <div class="floater-item-row ${isOutOfStock ? 'out-of-stock' : ''}">
+                        <img src="${imgUrl}" alt="${it.name}" class="floater-item-thumb" onerror="this.onerror=null; this.src='/static/images/perpetual_classic_burger.svg';">
+                        <div class="floater-item-info">
+                            <div class="floater-item-name">
+                                <span>${it.name}</span>
+                                <span class="floater-item-price">₱${it.price.toFixed(2)}</span>
+                            </div>
+                            <div class="floater-item-desc">${it.description || ''}</div>
+                            <div class="floater-item-meta">
+                                <span class="floater-cat-tag">${it.category}</span>
+                                ${allergenTags || '<span style="font-size: 11px; color: var(--text-muted);">No allergens</span>'}
+                                ${isOutOfStock ? '<span style="font-size: 11px; color: #EF4444; font-weight: 700; margin-left: 4px;">Out of Stock</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="floater-item-actions">
+                            ${!isOutOfStock ? `
+                                <button class="btn-floater-add" onclick="quickAddToCart('${escapedName}'); showToast('Added ${escapedName} to cart!', '🛒')">+ Add</button>
+                                <button class="btn-floater-ask" onclick="askBotAboutItem('${escapedName}')">💬 Ask</button>
+                            ` : `
+                                <button class="btn-floater-ask" onclick="askBotAboutItem('${escapedName}')">💬 Inquire</button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function askBotAboutItem(itemName) {
+            closeMenuFloater();
+            const input = document.getElementById('chatInput');
+            if (input) {
+                input.value = `I want to order 1 ${itemName}`;
+                sendChatMessage();
+            }
+        }
+
+        // Initialize Application with Cross-Reload Chat Persistence
         window.addEventListener('DOMContentLoaded', () => {
             initClock();
             fetchMenu();
             fetchCart();
             fetchKdsTickets();
+            initChatPersistence();
         });
 
         // Live Digital Clock
@@ -3822,6 +4202,7 @@
 
                 updateFsmBadge(data.fsm_state);
                 renderCart(data.cart);
+                initChatPersistence();
                 showToast(`Switched active tab to Table #${tableNum}!`, '📍');
             } catch(e) {
                 console.error("Failed to switch table:", e);
@@ -3903,7 +4284,7 @@
 
             filtered.forEach(it => {
                 const isOutOfStock = it.stock_qty <= 0;
-                const imgUrl = FOOD_PHOTOS[it.name] || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80';
+                const imgUrl = FOOD_PHOTOS[it.name] || '/static/images/perpetual_classic_burger.svg';
                 const isBestseller = BESTSELLERS.includes(it.name);
                 const isCombo = it.category === 'Combos';
                 let highlightBadge = '';
@@ -3928,7 +4309,7 @@
 
                 card.innerHTML = `
                     <div class="food-card-img-wrap">
-                        <img src="${imgUrl}" alt="${it.name}" class="food-card-img" loading="lazy" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80';">
+                        <img src="${imgUrl}" alt="${it.name}" class="food-card-img" loading="lazy" onerror="this.onerror=null; this.src='/static/images/perpetual_classic_burger.svg';">
                         <span class="card-badge-category">${it.category}</span>
                         ${highlightBadge}
                         <span class="card-badge-stock ${isOutOfStock ? 'badge-out-stock' : 'badge-in-stock'}">
@@ -4197,6 +4578,10 @@
         // Receipt Modal
         function showReceiptModal(receipt) {
             if (!receipt || (receipt.status !== 'success' && !receipt.receipt_id)) return;
+            // Mark current order complete so next order starts with a fresh chat
+            try {
+                localStorage.setItem('bistro_order_complete_table_' + currentTableNo, 'true');
+            } catch(e) {}
             document.getElementById('recId').innerText = receipt.receipt_id || 'PB-ORDER';
             document.getElementById('recTable').innerText = `Table #${receipt.table_no || currentTableNo}`;
             document.getElementById('recTime').innerText = new Date().toLocaleString();
@@ -4235,6 +4620,18 @@
 
         function closeReceiptModal() {
             document.getElementById('receiptModal').classList.remove('show');
+            clearChatPersistence();
+            const scroll = document.getElementById('chatScroll');
+            if (scroll) {
+                scroll.innerHTML = `
+                    <div class="chat-bubble bubble-waiter">
+                        <div class="waiter-bubble-header"><span>🍽️</span> BistroBot Digital Waiter</div>
+                        <div>
+                            Mabuhay and welcome to Perpetual Bistro! I am BistroBot, your AI dining assistant for Table #${currentTableNo}.
+                            How may I serve you today? Feel free to ask about our menu categories, allergen details, or place an order!
+                        </div>
+                    </div>`;
+            }
         }
 
         // FSM State Badge
@@ -4279,8 +4676,9 @@
             sendChatMessage();
         }
 
-        function appendChatBubble(sender, text, toolCalls = []) {
+        function appendChatBubble(sender, text, toolCalls = [], saveToStorage = true) {
             const scroll = document.getElementById('chatScroll');
+            if (!scroll) return;
             const bubble = document.createElement('div');
             bubble.className = `chat-bubble ${sender === 'customer' ? 'bubble-customer' : 'bubble-waiter'}`;
 
@@ -4297,6 +4695,71 @@
             bubble.innerHTML = html;
             scroll.appendChild(bubble);
             scroll.scrollTop = scroll.scrollHeight;
+
+            if (saveToStorage) {
+                try {
+                    const key = 'bistro_chat_history_table_' + currentTableNo;
+                    let history = JSON.parse(localStorage.getItem(key) || '[]');
+                    history.push({ sender, text, toolCalls, timestamp: new Date().toISOString() });
+                    localStorage.setItem(key, JSON.stringify(history));
+                } catch(e) {
+                    console.warn("[Chat Persistence] Error saving bubble:", e);
+                }
+            }
+        }
+
+        // Cross-Reload Chat Persistence (Only cleared when order is complete)
+        function initChatPersistence() {
+            try {
+                const key = 'bistro_chat_history_table_' + currentTableNo;
+                const orderCompleteKey = 'bistro_order_complete_table_' + currentTableNo;
+
+                // If previous order on this table was finalized & receipt issued, start with fresh greeting
+                if (localStorage.getItem(orderCompleteKey) === 'true') {
+                    localStorage.removeItem(key);
+                    localStorage.removeItem(orderCompleteKey);
+                    return;
+                }
+
+                const stored = localStorage.getItem(key);
+                if (!stored) {
+                    const scroll = document.getElementById('chatScroll');
+                    if (scroll && scroll.children.length === 0) {
+                        scroll.innerHTML = `
+                            <div class="chat-bubble bubble-waiter">
+                                <div class="waiter-bubble-header"><span>🍽️</span> BistroBot Digital Waiter</div>
+                                <div>
+                                    Mabuhay and welcome to Perpetual Bistro! I am BistroBot, your AI dining assistant for Table #${currentTableNo}.
+                                    How may I serve you today? Feel free to ask about our menu categories, allergen details, or place an order!
+                                </div>
+                            </div>`;
+                    }
+                    return;
+                }
+                const history = JSON.parse(stored);
+                if (!Array.isArray(history) || history.length === 0) return;
+
+                const scroll = document.getElementById('chatScroll');
+                if (!scroll) return;
+
+                // Clear placeholder and replay stored conversation
+                scroll.innerHTML = '';
+                history.forEach(item => {
+                    appendChatBubble(item.sender, item.text, item.toolCalls || [], false);
+                });
+                scroll.scrollTop = scroll.scrollHeight;
+            } catch(e) {
+                console.warn("[Chat Persistence] Error initializing:", e);
+            }
+        }
+
+        function clearChatPersistence() {
+            try {
+                const key = 'bistro_chat_history_table_' + currentTableNo;
+                const orderCompleteKey = 'bistro_order_complete_table_' + currentTableNo;
+                localStorage.removeItem(key);
+                localStorage.removeItem(orderCompleteKey);
+            } catch(e) {}
         }
 
         // TTS Audio Playback (Dual-Engine: Neural Edge-TTS + 100% Offline Browser SAPI Fallback)

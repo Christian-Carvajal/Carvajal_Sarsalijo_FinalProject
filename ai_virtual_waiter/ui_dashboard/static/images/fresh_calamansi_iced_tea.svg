@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#132009"/>
+      <stop offset="60%" stop-color="#2E4A10"/>
+      <stop offset="100%" stop-color="#4D7C0F"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="45%">
+      <stop offset="0%" stop-color="#A3E635" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#A3E635" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <rect width="600" height="400" fill="url(#bg)"/>
+  <circle cx="300" cy="180" r="160" fill="url(#glow)"/>
+  <rect x="24" y="24" width="552" height="352" rx="16" fill="none" stroke="#A3E635" stroke-width="1.5" stroke-opacity="0.4" stroke-dasharray="6 4"/>
+  <g transform="translate(300, 160)" filter="url(#shadow)">
+    <circle cx="0" cy="0" r="70" fill="#2E4A10" stroke="#A3E635" stroke-width="3"/>
+    <text x="0" y="24" font-size="68" text-anchor="middle" font-family="'Segoe UI Emoji', AppleColorEmoji, sans-serif">🍹</text>
+  </g>
+  <text x="300" y="280" font-family="'Segoe UI', -apple-system, sans-serif" font-size="24" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.5">Fresh Calamansi Iced Tea</text>
+  <text x="300" y="310" font-family="'Segoe UI', -apple-system, sans-serif" font-size="13" font-weight="500" fill="#E2E8F0" text-anchor="middle" fill-opacity="0.85">House Black Tea • Fresh Calamansi Citrus</text>
+  <g transform="translate(300, 345)">
+    <rect x="-80" y="-14" width="160" height="28" rx="14" fill="#A3E635" fill-opacity="0.2" stroke="#A3E635" stroke-width="1"/>
+    <text x="0" y="5" font-family="'Segoe UI', sans-serif" font-size="12" font-weight="700" fill="#A3E635" text-anchor="middle" letter-spacing="1">PERPETUAL BISTRO</text>
+  </g>
+</svg>
