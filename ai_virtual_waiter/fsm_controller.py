@@ -833,7 +833,7 @@ class BistroFSMAgent:
             "- When customer confirms, places, or checks out the order (e.g. 'confirm order', 'place order', 'bayaran na', 'paki-order na'): call `confirm_order_and_deduct_stock()`.\n"
             "- When customer asks about dietary allergens (e.g. 'does the burger have dairy?', 'may gluten ba?'): call `check_item_allergen`.\n"
             "- When customer asks about kitchen tickets, status, or business revenue: call `get_kitchen_tickets` or `get_analytics_summary`.\n"
-            "- NATURAL CONVERSATIONAL SPEECH: Always converse warmly, thoughtfully, and naturally as an attentive bistro waiter. When executing actions (adding dishes, removing dishes, checking bills, answering questions), NEVER give robotic one-word answers like 'Updated.' or raw status dumps. Acknowledge what was done in full, warm sentences and offer helpful suggestions (e.g. 'I have added 1x Perpetual Classic Burger to your tab! Would you like fries or a refreshing iced tea with that?').\n"
+            "- NATURAL CONVERSATIONAL SPEECH: Always converse warmly, thoughtfully, and naturally as an attentive bistro waiter. When executing actions (adding dishes, removing dishes, checking bills, answering questions), always speak in full, polite sentences. Acknowledge what was done clearly and offer helpful suggestions (e.g. 'I have added 1x Perpetual Classic Burger to your tab! Would you like fries or a refreshing iced tea with that?').\n"
             "- DIETARY & ALLERGEN CARE: When answering allergen or health queries (e.g. lactose intolerance, dairy, gluten), explain clearly which components contain the allergen and offer kitchen adjustments (e.g. removing cheese, dairy-free alternatives).\n"
             "- PRONOUN RESOLUTION: If the customer refers to 'that', 'it', 'the only item', or 'the 1 item in the cart', resolve it to the dish listed in the active cart above.\n"
             "- CREATOR IDENTITY: You were engineered and created by Christian Ezekiel L. Carvajal and John Miko P. Sarsalijo (3rd-year BSCS - Data Science, UPHSD). Always mention both by name when asked who created or developed you.\n"
@@ -1186,26 +1186,26 @@ class BistroFSMAgent:
 
         # Clear Cart Safety Guard
         is_clear_intent = bool(re.search(
-            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            r"\b(clear\s+(?:my\s+)?(?:order|cart|tab)|empty\s+(?:my\s+)?(?:cart|order|tab)|cancel\s+(?:my\s+)?(?:order|cart|tab|all|everything)|(?:don't|dont|do\s+not)\s+want\s+to\s+eat|(?:remove|delete)\s+(?:all|everything)|ayaw\s+ko\s+na(?:\s+kumain)?|wag\s+na\s+lang|huwag\s+na\s+lang|reset\s+(?:cart|order|tab)|(?:alisin|tanggalin)\s+(?:lahat|mo\s+lahat))\b",
             text_lower
         ))
         if is_clear_intent and "clear_cart" not in tools_executed:
             c_res = self.execute_tool("clear_cart", {})
             turn_tool_calls.append({"tool": "clear_cart", "arguments": {}, "result": c_res})
             tools_executed.add("clear_cart")
-            return "I have cleared all items from your order tab. Your cart is now completely empty."
+            return "I have cleared all items from your order tab. Your cart is now completely empty. Feel free to let me know whenever you'd like to order again!"
 
         # Replace Item Safety Guard
         is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
         if is_replace_intent and "replace_order_item" not in tools_executed:
-            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)\s+(?:with|to|for|ng|into)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
             raw_old = rep_match.group(1).strip() if rep_match else "burger"
             raw_new = rep_match.group(2).strip() if rep_match else text_lower
             rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
             turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
             tools_executed.add("replace_order_item")
             if rep_res.get("status") == "success":
-                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}."
+                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('quantity', 1)}x {rep_res.get('new_item')} in your order tab! Your updated total is ₱{rep_res.get('new_order_total', 0):.2f}. Would you like anything else?"
             return rep_res.get("message", "Unable to replace item.")
 
         has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
@@ -1394,7 +1394,7 @@ class BistroFSMAgent:
                 return turn_data
 
         is_clear_intent = bool(re.search(
-            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            r"\b(clear\s+(?:my\s+)?(?:order|cart|tab)|empty\s+(?:my\s+)?(?:cart|order|tab)|cancel\s+(?:my\s+)?(?:order|cart|tab|all|everything)|(?:don't|dont|do\s+not)\s+want\s+to\s+eat|(?:remove|delete)\s+(?:all|everything)|ayaw\s+ko\s+na(?:\s+kumain)?|wag\s+na\s+lang|huwag\s+na\s+lang|reset\s+(?:cart|order|tab)|(?:alisin|tanggalin)\s+(?:lahat|mo\s+lahat))\b",
             text_lower
         ))
         is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
@@ -1424,16 +1424,16 @@ class BistroFSMAgent:
 
         # Intent: Replace / Substitute Item in Cart
         elif is_replace_intent:
-            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)\s+(?:with|to|for|ng|into)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
             raw_old = rep_match.group(1).strip() if rep_match else "burger"
             raw_new = rep_match.group(2).strip() if rep_match else text_lower
             rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
             turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
             if rep_res.get("status") == "success":
                 if is_filipino:
-                    resp_text = f"Napalitan ko na po ang {rep_res.get('old_item')} ng {rep_res.get('new_item')} sa inyong order tab! Ang inyong bagong total ay ₱{rep_res.get('new_order_total', 0):.2f}."
+                    resp_text = f"Napalitan ko na po ang {rep_res.get('old_item')} ng {rep_res.get('quantity', 1)}x {rep_res.get('new_item')} sa inyong order tab! Ang inyong bagong total ay ₱{rep_res.get('new_order_total', 0):.2f}."
                 else:
-                    resp_text = f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}. Would you like to add anything else?"
+                    resp_text = f"I've replaced {rep_res.get('old_item')} with {rep_res.get('quantity', 1)}x {rep_res.get('new_item')} in your order tab! Your updated total is ₱{rep_res.get('new_order_total', 0):.2f}. Would you like to add anything else?"
             else:
                 resp_text = rep_res.get("message", "Unable to replace item.")
             cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
@@ -1483,26 +1483,26 @@ class BistroFSMAgent:
         # 1. Intent: Allergen & Dietary Query (Priority 1: Never add to cart!)
         # Clear Cart Safety Guard
         is_clear_intent = bool(re.search(
-            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            r"\b(clear\s+(?:my\s+)?(?:order|cart|tab)|empty\s+(?:my\s+)?(?:cart|order|tab)|cancel\s+(?:my\s+)?(?:order|cart|tab|all|everything)|(?:don't|dont|do\s+not)\s+want\s+to\s+eat|(?:remove|delete)\s+(?:all|everything)|ayaw\s+ko\s+na(?:\s+kumain)?|wag\s+na\s+lang|huwag\s+na\s+lang|reset\s+(?:cart|order|tab)|(?:alisin|tanggalin)\s+(?:lahat|mo\s+lahat))\b",
             text_lower
         ))
         if is_clear_intent and "clear_cart" not in tools_executed:
             c_res = self.execute_tool("clear_cart", {})
             turn_tool_calls.append({"tool": "clear_cart", "arguments": {}, "result": c_res})
             tools_executed.add("clear_cart")
-            return "I have cleared all items from your order tab. Your cart is now completely empty."
+            return "I have cleared all items from your order tab. Your cart is now completely empty. Feel free to let me know whenever you'd like to order again!"
 
         # Replace Item Safety Guard
         is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
         if is_replace_intent and "replace_order_item" not in tools_executed:
-            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)\s+(?:with|to|for|ng|into)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
             raw_old = rep_match.group(1).strip() if rep_match else "burger"
             raw_new = rep_match.group(2).strip() if rep_match else text_lower
             rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
             turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
             tools_executed.add("replace_order_item")
             if rep_res.get("status") == "success":
-                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}."
+                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('quantity', 1)}x {rep_res.get('new_item')} in your order tab! Your updated total is ₱{rep_res.get('new_order_total', 0):.2f}. Would you like anything else?"
             return rep_res.get("message", "Unable to replace item.")
 
         has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
@@ -1973,18 +1973,24 @@ class BistroFSMAgent:
                         pass
 
                 text_lower = user_input.lower()
+                ambig = check_ambiguous_category_request(user_input)
+
                 is_clear_intent = bool(re.search(
-                    r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+                    r"\b(clear\s+(?:my\s+)?(?:order|cart|tab)|empty\s+(?:my\s+)?(?:cart|order|tab)|cancel\s+(?:my\s+)?(?:order|cart|tab|all|everything)|(?:don't|dont|do\s+not)\s+want\s+to\s+eat|(?:remove|delete)\s+(?:all|everything)|ayaw\s+ko\s+na(?:\s+kumain)?|wag\s+na\s+lang|huwag\s+na\s+lang|reset\s+(?:cart|order|tab)|(?:alisin|tanggalin)\s+(?:lahat|mo\s+lahat))\b",
                     text_lower
                 ))
                 is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
                 has_allergen_words = any(w in text_lower for w in ["dairy", "lactose", "gluten", "allergen", "allergy", "allergies", "nuts", "egg", "pork", "shellfish"])
                 is_remove_intent = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal|only\s+1\s+item|only\s+item|remove\s+that|remove\s+it|cancel\s+that|alisin\s+yan|tanggalin\s+yan)\b", text_lower))
+                has_order_verb = any(w in text_lower for w in ["add", "buy", "order", "pabili", "bilhin", "pakidagdag", "isama", "gusto ko"])
 
-                if is_clear_intent and not any(tc.get("function", {}).get("name") == "clear_cart" for tc in tool_calls):
+                if ambig:
+                    tool_calls = []
+                    final_content = ambig.get("prompt") or ambig.get("message", "")
+                elif is_clear_intent:
                     tool_calls = [{"function": {"name": "clear_cart", "arguments": {}}}]
-                elif is_replace_intent and not any(tc.get("function", {}).get("name") == "replace_order_item" for tc in tool_calls):
-                    rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+                elif is_replace_intent:
+                    rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)\s+(?:with|to|for|ng|into)\s+(?:the\s+|ang\s+|yung\s+)?(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
                     raw_old = rep_match.group(1).strip() if rep_match else "burger"
                     raw_new = rep_match.group(2).strip() if rep_match else text_lower
                     tool_calls = [{"function": {"name": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}}}]
@@ -2006,17 +2012,16 @@ class BistroFSMAgent:
                         if found_r:
                             target_name = found_r[0][0]["name"]
                         tool_calls = [{"function": {"name": "remove_item_from_order", "arguments": {"item_name": target_name}}}]
-                elif not tool_calls and not check_ambiguous_category_request(user_input) and any(w in text_lower for w in ["add", "buy", "order", "pabili", "bilhin", "pakidagdag"]):
+                elif has_order_verb and not any(tc.get("function", {}).get("name") == "add_item_to_order" for tc in tool_calls):
                     found_o = find_dishes_in_text(user_input)
                     if found_o:
                         tool_calls = [{"function": {"name": "add_item_to_order", "arguments": {"item_name": found_o[0][0]["name"], "qty": found_o[0][1], "instructions": found_o[0][2]}}}]
 
                 if not tool_calls:
-                    final_content = raw_content
+                    final_content = final_content or raw_content
                     break
 
-                if not assistant_msg.get("tool_calls"):
-                    assistant_msg = {"role": "assistant", "content": "", "tool_calls": tool_calls}
+                assistant_msg = {"role": "assistant", "content": "", "tool_calls": tool_calls}
                 self.messages.append(assistant_msg)
 
                 for tc in tool_calls:
@@ -2077,6 +2082,17 @@ class BistroFSMAgent:
 
             clean_text = re.sub(r"<think>.*?</think>", "", final_content, flags=re.DOTALL).strip()
 
+            # Quality and grounding guard on LLM synthesis
+            tool_names = [tc["tool"] for tc in turn_tool_calls]
+            if "replace_order_item" in tool_names:
+                if "updated quantity" in clean_text.lower() or ("replace" not in clean_text.lower() and "palitan" not in clean_text.lower() and "substitute" not in clean_text.lower() and "bago" not in clean_text.lower()):
+                    clean_text = ""
+            if "clear_cart" in tool_names:
+                if "empty" not in clean_text.lower() and "clear" not in clean_text.lower() and "alisin" not in clean_text.lower() and "wala" not in clean_text.lower() and "bura" not in clean_text.lower():
+                    clean_text = ""
+            if clean_text.strip().lower() in ["updated.", "updated", "done.", "ok.", "okay.", "confirmed."]:
+                clean_text = ""
+
             # Absolute fallback ONLY if the LLM produced zero text:
             if not clean_text:
                 fallback_speech = self._ensure_critical_tool_execution(user_input, turn_tool_calls)
@@ -2116,9 +2132,12 @@ class BistroFSMAgent:
                         elif t_res.get("status") == "out_of_stock":
                             synthesis_parts.append(f"{t_res.get('message')} {t_res.get('suggestion', '')}".strip())
                     elif t_name == "replace_order_item":
-                        synthesis_parts.append(t_res.get("message", "Replaced item in your order tab."))
+                        if t_res.get("status") == "success":
+                            synthesis_parts.append(f"I've replaced {t_res.get('old_item')} with {t_res.get('quantity', 1)}x {t_res.get('new_item')} in your order tab! Your updated total is ₱{t_res.get('new_order_total', 0):.2f}. Would you like anything else?")
+                        else:
+                            synthesis_parts.append(t_res.get("message", "Replaced item in your order tab."))
                     elif t_name == "clear_cart":
-                        synthesis_parts.append(t_res.get("message", "Cleared all items from your order tab."))
+                        synthesis_parts.append("I have cleared all items from your order tab. Your cart is now completely empty. Feel free to let me know whenever you'd like to order again!")
                     elif t_name == "remove_item_from_order":
                         synthesis_parts.append(t_res.get("message", "Removed item from your cart."))
                     elif t_name == "update_item_quantity":
