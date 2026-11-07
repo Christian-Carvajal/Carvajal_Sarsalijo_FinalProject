@@ -582,6 +582,98 @@ def remove_item_from_order(session_id: str, item_name: str, db_path: str = DB_PA
         }
 
 
+def clear_cart(session_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """Clears and removes all items from the customer's active order tab in SQLite."""
+    return remove_item_from_order(session_id, "all", db_path=db_path)
+
+
+def replace_order_item(session_id: str, old_item: str, new_item: str, new_qty: int = 1, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Substitutes / replaces an item in the customer's active order tab with another menu item.
+    Safely resolves generic categories from current cart, removes old_item, adds new_item, and updates the bill.
+    """
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM table_sessions WHERE session_id = ?", (session_id,))
+        sess_row = cursor.fetchone()
+        if sess_row and sess_row["status"] == "STATE_CONFIRMED":
+            return {
+                "status": "error",
+                "success": False,
+                "error": "Cannot modify order. This tab has already been confirmed and finalized.",
+                "message": "Cannot modify order. This tab has already been confirmed and finalized.",
+            }
+
+        # Resolve old_item from active cart if generic (e.g. 'burger')
+        cursor.execute(
+            "SELECT oli.item_id, mi.name, mi.category FROM order_line_items oli JOIN menu_items mi ON oli.item_id = mi.id WHERE oli.session_id = ?",
+            (session_id,)
+        )
+        cart_rows = cursor.fetchall()
+        if not cart_rows:
+            return {
+                "status": "empty_cart",
+                "success": False,
+                "error": "Your order tab is currently empty. There is nothing to replace.",
+                "message": "Your order tab is currently empty. There is nothing to replace.",
+            }
+
+        target_old_name = old_item.strip()
+        matched_cart_item = None
+
+        # Check if old_item matches exact or partial name in cart
+        for r in cart_rows:
+            r_name = r["name"].lower()
+            if target_old_name.lower() in r_name or r_name in target_old_name.lower():
+                matched_cart_item = r["name"]
+                break
+
+        # Check if target_old_name is a generic category (e.g. 'burger', 'pasta', 'drink')
+        if not matched_cart_item:
+            old_low = target_old_name.lower()
+            for r in cart_rows:
+                r_cat = (r["category"] or "").lower()
+                r_name = r["name"].lower()
+                if old_low in r_cat or old_low in r_name or ("burger" in old_low and "burger" in r_name):
+                    matched_cart_item = r["name"]
+                    break
+
+        if matched_cart_item:
+            target_old_name = matched_cart_item
+
+    # Step 1: Remove old item
+    rem_res = remove_item_from_order(session_id, target_old_name, db_path=db_path)
+    if not rem_res.get("success"):
+        return {
+            "status": "error",
+            "success": False,
+            "message": rem_res.get("message", f"Could not find or remove '{target_old_name}' from your order tab."),
+        }
+    actual_old_name = rem_res.get("removed_item", target_old_name)
+
+    # Step 2: Add new item
+    add_res = add_item_to_order(session_id, new_item, qty=new_qty, db_path=db_path)
+    if not add_res.get("success"):
+        return {
+            "status": "partial_error",
+            "success": False,
+            "message": f"Removed {actual_old_name}, but could not add {new_item}: {add_res.get('message')}",
+            "old_item": actual_old_name,
+        }
+
+    actual_new_name = add_res.get("added_item", {}).get("name", new_item)
+    return {
+        "status": "success",
+        "success": True,
+        "message": f"Successfully replaced {actual_old_name} with {new_qty}x {actual_new_name} in your order tab.",
+        "old_item": actual_old_name,
+        "new_item": actual_new_name,
+        "quantity": new_qty,
+        "new_order_subtotal": add_res.get("new_order_subtotal"),
+        "new_order_total": add_res.get("new_order_total"),
+    }
+
+
 def update_item_quantity(session_id: str, item_name: str, qty: int, db_path: str = DB_PATH) -> Dict[str, Any]:
     """
     Updates the quantity of an item in the active order. If qty <= 0, deletes the item.

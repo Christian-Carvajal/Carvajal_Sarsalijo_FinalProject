@@ -202,11 +202,36 @@ BISTRO_TOOLS = [
         "type": "function",
         "function": {
             "name": "clear_cart",
-            "description": "Delete all items and completely reset the customer's active order tab in the database.",
+            "description": "Delete all items and completely reset the customer's active order tab in the database when customer says 'clear my order', 'clear cart', 'cancel order', 'i don't want to eat anymore', 'ayaw ko na kumain', or 'alisin lahat'.",
             "parameters": {
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_order_item",
+            "description": "Replace or swap an existing item in the customer's cart with another menu item (e.g. 'replace bacon mushroom melt with calamansi ice tea', 'change burger to calamansi juice', 'palitan ang burger ng iced tea').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "old_item": {
+                        "type": "string",
+                        "description": "Name or category of the dish to be replaced from the active cart (e.g. 'Bacon Mushroom Melt Burger', 'burger')."
+                    },
+                    "new_item": {
+                        "type": "string",
+                        "description": "Name of the replacement dish to be added (e.g. 'Fresh Calamansi Iced Tea', 'calamansi juice')."
+                    },
+                    "qty": {
+                        "type": "integer",
+                        "description": "Quantity of the replacement dish (defaults to 1)."
+                    }
+                },
+                "required": ["old_item", "new_item"]
             }
         }
     },
@@ -801,6 +826,8 @@ class BistroFSMAgent:
             "- When customer wants to buy, order, or add an item (e.g. 'i want to buy perpetual burger', 'add on cart the perpetual classic', 'pabili ng burger', '1 burger and iced tea'): YOU MUST call `add_item_to_order`. Never just say you added it in text without calling the tool!\n"
             "- AMBIGUOUS DISH POLICY: If the customer asks for a generic category without specifying the exact dish (e.g. 'can i order a burger?', 'can i order pasta?', 'order drinks', 'pabili ng kape'), DO NOT arbitrarily add a dish to the cart! Instead, present the available options in that category (e.g. Perpetual Classic Burger vs Bacon Mushroom Melt Burger) and ask which one they prefer.\n"
             "- When customer wants to remove or cancel an item (e.g. 'can you remove that in the cart?', 'remove it', 'alisin yan', 'the only 1 item in the cart'): look at the active cart above and immediately call `remove_item_from_order` with the item name from the cart! Do NOT ask what item to remove if there is only 1 item in the cart; execute the tool immediately!\n"
+            "- REPLACING / SUBSTITUTING ITEMS: When customer wants to replace, change, or swap an item in their cart (e.g. 'replace bacon mushroom melt with calamansi ice tea', 'change burger to calamansi juice', 'palitan ang burger ng iced tea'): call `replace_order_item(old_item='...', new_item='...')`.\n"
+            "- CLEARING ORDER TAB: When customer says 'clear my order', 'clear cart', 'cancel order', 'i don't want to eat anymore', 'ayaw ko na kumain', 'alisin lahat': call `clear_cart()` immediately.\n"
             "- When customer asks for recommendations, suggestions, or pairings (e.g. 'what can you suggest for me?', 'ano masarap?', 'di ako makapili'): call `get_recommendations()` or recommend crowd favorites directly.\n"
             "- When customer asks for the bill, total, receipt, or cart summary (e.g. 'bill please', 'magkano na bill ko?', 'view cart'): call `view_current_order()`.\n"
             "- When customer confirms, places, or checks out the order (e.g. 'confirm order', 'place order', 'bayaran na', 'paki-order na'): call `confirm_order_and_deduct_stock()`.\n"
@@ -1017,6 +1044,22 @@ class BistroFSMAgent:
             self.transition_state(STATE_TAKING_ORDER, reason="Customer cleared cart")
             return res
 
+        elif tool_name == "replace_order_item":
+            if self.state == STATE_CONFIRMED:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "error": "Cannot modify order. This tab has already been confirmed and finalized.",
+                    "message": "Cannot modify order. This tab has already been confirmed and finalized."
+                }
+            old_it = args.get("old_item", "")
+            new_it = args.get("new_item", "")
+            qty = int(args.get("qty", 1))
+            res = db_tools.replace_order_item(self.session_id, old_it, new_it, new_qty=qty, db_path=self.db_path)
+            if res.get("status") == "success":
+                self.transition_state(STATE_TAKING_ORDER, reason=f"Customer replaced {old_it} with {new_it}")
+            return res
+
         elif tool_name == "get_analytics_summary":
             return db_tools.get_analytics_summary(db_path=self.db_path)
 
@@ -1140,6 +1183,30 @@ class BistroFSMAgent:
                 extra_messages.append(f"Your last added item was {last_i['quantity']}x {last_i['name']} (₱{last_i['unit_price']:.2f}).")
             else:
                 extra_messages.append("You haven't added any items to your order tab yet.")
+
+        # Clear Cart Safety Guard
+        is_clear_intent = bool(re.search(
+            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            text_lower
+        ))
+        if is_clear_intent and "clear_cart" not in tools_executed:
+            c_res = self.execute_tool("clear_cart", {})
+            turn_tool_calls.append({"tool": "clear_cart", "arguments": {}, "result": c_res})
+            tools_executed.add("clear_cart")
+            return "I have cleared all items from your order tab. Your cart is now completely empty."
+
+        # Replace Item Safety Guard
+        is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
+        if is_replace_intent and "replace_order_item" not in tools_executed:
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            raw_old = rep_match.group(1).strip() if rep_match else "burger"
+            raw_new = rep_match.group(2).strip() if rep_match else text_lower
+            rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
+            turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
+            tools_executed.add("replace_order_item")
+            if rep_res.get("status") == "success":
+                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}."
+            return rep_res.get("message", "Unable to replace item.")
 
         has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
         has_question_words = bool(re.search(r"\b(does|is|are|can|what|anong|ano|meron|mayroon|how much|magkano|ingredients|contain)\b", text_lower))
@@ -1326,8 +1393,66 @@ class BistroFSMAgent:
                 self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
                 return turn_data
 
+        is_clear_intent = bool(re.search(
+            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            text_lower
+        ))
+        is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
+
+        # Intent: Clear Order Tab Completely
+        if is_clear_intent:
+            c_res = self.execute_tool("clear_cart", {})
+            turn_tool_calls.append({"tool": "clear_cart", "arguments": {}, "result": c_res})
+            if is_filipino:
+                resp_text = "Naalis ko na po ang lahat ng putahe sa inyong order tab. Wala na pong laman ang inyong cart. Sabihan niyo lang po ako kung nais ninyong mag-order ulit!"
+            else:
+                resp_text = "I have cleared all items from your order tab. Your cart is now completely empty. Feel free to let me know whenever you'd like to order again!"
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "turn_index": len(self.messages),
+                "user_input": user_input,
+                "assistant_response": resp_text,
+                "current_state": self.state,
+                "fsm_state": self.state,
+                "tool_calls": turn_tool_calls,
+                "engine": "fallback_deterministic",
+                "reason": "clear_cart_intent",
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
+        # Intent: Replace / Substitute Item in Cart
+        elif is_replace_intent:
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            raw_old = rep_match.group(1).strip() if rep_match else "burger"
+            raw_new = rep_match.group(2).strip() if rep_match else text_lower
+            rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
+            turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
+            if rep_res.get("status") == "success":
+                if is_filipino:
+                    resp_text = f"Napalitan ko na po ang {rep_res.get('old_item')} ng {rep_res.get('new_item')} sa inyong order tab! Ang inyong bagong total ay ₱{rep_res.get('new_order_total', 0):.2f}."
+                else:
+                    resp_text = f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}. Would you like to add anything else?"
+            else:
+                resp_text = rep_res.get("message", "Unable to replace item.")
+            cart_state = db_tools.view_current_order(self.session_id, db_path=self.db_path)
+            turn_data = {
+                "turn_index": len(self.messages),
+                "user_input": user_input,
+                "assistant_response": resp_text,
+                "current_state": self.state,
+                "fsm_state": self.state,
+                "tool_calls": turn_tool_calls,
+                "engine": "fallback_deterministic",
+                "reason": "replace_item_intent",
+                "cart": cart_state,
+            }
+            self.audit_log.append({"type": "dialogue_turn", "data": turn_data})
+            return turn_data
+
         # 0. Intent: Greeting (if customer greets without dishes or explicit ordering verbs)
-        if has_greeting and not has_order_verb and not (found_dishes and not has_browse_query):
+        elif has_greeting and not has_order_verb and not (found_dishes and not has_browse_query):
             if is_filipino:
                 resp_text = (
                     f"Mabuhay! Ako si BistroBot, ang inyong AI dining assistant para sa Table #{self.table_no}. "
@@ -1356,6 +1481,30 @@ class BistroFSMAgent:
             return turn_data
 
         # 1. Intent: Allergen & Dietary Query (Priority 1: Never add to cart!)
+        # Clear Cart Safety Guard
+        is_clear_intent = bool(re.search(
+            r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+            text_lower
+        ))
+        if is_clear_intent and "clear_cart" not in tools_executed:
+            c_res = self.execute_tool("clear_cart", {})
+            turn_tool_calls.append({"tool": "clear_cart", "arguments": {}, "result": c_res})
+            tools_executed.add("clear_cart")
+            return "I have cleared all items from your order tab. Your cart is now completely empty."
+
+        # Replace Item Safety Guard
+        is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
+        if is_replace_intent and "replace_order_item" not in tools_executed:
+            rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+            raw_old = rep_match.group(1).strip() if rep_match else "burger"
+            raw_new = rep_match.group(2).strip() if rep_match else text_lower
+            rep_res = self.execute_tool("replace_order_item", {"old_item": raw_old, "new_item": raw_new, "qty": 1})
+            turn_tool_calls.append({"tool": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}, "result": rep_res})
+            tools_executed.add("replace_order_item")
+            if rep_res.get("status") == "success":
+                return f"I've replaced {rep_res.get('old_item')} with {rep_res.get('new_item')} in your order tab! Your new order total is ₱{rep_res.get('new_order_total', 0):.2f}."
+            return rep_res.get("message", "Unable to replace item.")
+
         has_allergen_words = any(w in text_lower for w in ["allergen", "allergy", "allergies", "lactose", "dairy", "gluten", "wheat", "nut", "nuts", "egg", "pork", "shellfish"])
         if has_allergen_words:
             target_dish = found_dishes[0][0]["name"] if found_dishes else "Perpetual Classic Burger"
@@ -1824,10 +1973,22 @@ class BistroFSMAgent:
                         pass
 
                 text_lower = user_input.lower()
+                is_clear_intent = bool(re.search(
+                    r"\b(clear\s+(?:my\s+)?order|clear\s+(?:my\s+)?cart|clear\s+tab|cancel\s+(?:my\s+)?order|cancel\s+all|don't\s+want\s+to\s+eat|dont\s+want\s+to\s+eat|ayaw\s+ko\s+nang?\s+kumain|ayaw\s+na\s+kumain|reset\s+cart|reset\s+order|alisin\s+lahat|tanggalin\s+lahat)\b",
+                    text_lower
+                ))
+                is_replace_intent = bool(re.search(r"\b(replace|swap|substitute|palitan|change)\b", text_lower)) and bool(re.search(r"\b(with|to|for|ng|into)\b", text_lower))
                 has_allergen_words = any(w in text_lower for w in ["dairy", "lactose", "gluten", "allergen", "allergy", "allergies", "nuts", "egg", "pork", "shellfish"])
                 is_remove_intent = bool(re.search(r"\b(remove|delete|cancel|alisin|tanggalin|bawas|ibawas|alising|tanggal|only\s+1\s+item|only\s+item|remove\s+that|remove\s+it|cancel\s+that|alisin\s+yan|tanggalin\s+yan)\b", text_lower))
 
-                if has_allergen_words and not any(tc.get("function", {}).get("name") == "check_item_allergen" for tc in tool_calls):
+                if is_clear_intent and not any(tc.get("function", {}).get("name") == "clear_cart" for tc in tool_calls):
+                    tool_calls = [{"function": {"name": "clear_cart", "arguments": {}}}]
+                elif is_replace_intent and not any(tc.get("function", {}).get("name") == "replace_order_item" for tc in tool_calls):
+                    rep_match = re.search(r"(?:replace|swap|substitute|palitan|change)\s+(.*?)\s+(?:with|to|for|ng|into)\s+(.*?)(?:\s+(?:instead|cause|kasi|because|please|po)|\s*$)", text_lower)
+                    raw_old = rep_match.group(1).strip() if rep_match else "burger"
+                    raw_new = rep_match.group(2).strip() if rep_match else text_lower
+                    tool_calls = [{"function": {"name": "replace_order_item", "arguments": {"old_item": raw_old, "new_item": raw_new, "qty": 1}}}]
+                elif has_allergen_words and not any(tc.get("function", {}).get("name") == "check_item_allergen" for tc in tool_calls):
                     found_a = find_dishes_in_text(user_input)
                     t_dish = found_a[0][0]["name"] if found_a else "Perpetual Classic Burger"
                     t_allergen = "Dairy"
@@ -1954,6 +2115,10 @@ class BistroFSMAgent:
                             synthesis_parts.append(t_res.get("message", "Added item to your order tab."))
                         elif t_res.get("status") == "out_of_stock":
                             synthesis_parts.append(f"{t_res.get('message')} {t_res.get('suggestion', '')}".strip())
+                    elif t_name == "replace_order_item":
+                        synthesis_parts.append(t_res.get("message", "Replaced item in your order tab."))
+                    elif t_name == "clear_cart":
+                        synthesis_parts.append(t_res.get("message", "Cleared all items from your order tab."))
                     elif t_name == "remove_item_from_order":
                         synthesis_parts.append(t_res.get("message", "Removed item from your cart."))
                     elif t_name == "update_item_quantity":
